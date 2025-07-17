@@ -19,12 +19,32 @@ class Settings(BaseSettings):
     )
     openai_api_key: Optional[str] = Field(default=None, description="OpenAI API key")
 
+    # Reddit API Configuration  
+    rapidapi_reddit_host: str = Field(
+        default="reddit-com.p.rapidapi.com", 
+        description="RapidAPI Reddit host"
+    )
+    reddit_api_timeout: int = Field(
+        default=30, 
+        description="Reddit API request timeout in seconds"
+    )
+    reddit_api_rate_limit_delay: float = Field(
+        default=0.1, 
+        description="Delay between Reddit API requests in seconds"
+    )
+
     # Application Configuration
     log_level: str = Field(default="INFO", description="Logging level")
     max_concurrent_agents: int = Field(
         default=5, description="Maximum concurrent AI agents"
     )
     debug: bool = Field(default=False, description="Enable debug mode")
+
+    # AI Model Configuration
+    primary_ai_model: str = Field(
+        default="gpt-4.1-2025-04-14", 
+        description="Primary AI model for comment analysis"
+    )
 
     # API Server Configuration
     host: str = Field(default="0.0.0.0", description="Server host")

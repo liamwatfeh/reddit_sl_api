@@ -11,6 +11,7 @@ class CommentAnalysis(BaseModel):
     """Model for individual comment analysis results."""
 
     post_id: str
+    post_url: str  # URL to original Reddit post for verification
     quote: str
     sentiment: str  # "positive", "negative", "neutral"
     theme: str
@@ -23,16 +24,18 @@ class CommentAnalysis(BaseModel):
 
 
 class PostWithComments(BaseModel):
-    """Model for Reddit post with its comments."""
+    """Post with all its comments after cleaning"""
 
     post_id: str
     post_title: str
     post_content: str
     post_author: str
     post_score: int
-    post_created_utc: datetime
+    post_date: datetime
+    subreddit: str
+    permalink: str
+    url: str
     comments: List[Dict[str, Any]]
-    metadata: Dict[str, Any]
 
 
 class ConfigurableAnalysisRequest(BaseModel):
@@ -49,6 +52,47 @@ class ConfigurableAnalysisRequest(BaseModel):
     max_quote_length: int = 200
 
 
+class SubredditAnalysisRequest(BaseModel):
+    """Request schema for /analyze-subreddit endpoint"""
+    # Subreddit browsing parameters
+    subreddit: str  # e.g., "motorcycles", "BMW", "advrider"
+    sort: str = "hot"  # "hot", "new", "top", "controversial", "rising"
+    time: str = "week"  # "all", "year", "month", "week", "day", "hour"
+    limit: int = 50  # Number of posts to analyze
+    
+    # Model configuration
+    model: str = "gemini-2.5-pro"
+    api_key: str  # LLM API key
+    
+    # Analysis configuration
+    system_prompt: str = """You are an expert social media analyst specializing in automotive discussions, particularly BMW motorcycles. Your task is to analyze Reddit discussions to identify only the most relevant and insightful comments worth highlighting."""
+    
+    # Output configuration
+    output_format: str = "json"
+    max_quote_length: int = 200
+
+
+class SearchAnalysisRequest(BaseModel):
+    """Request schema for /analyze-search endpoint"""
+    # Search parameters
+    query: str  # Search query, e.g., "BMW R 12 GS"
+    sort: str = "relevance"  # "relevance", "hot", "top", "new", "comments"
+    time: str = "week"  # "all", "year", "month", "week", "day", "hour"
+    limit: int = 50  # Number of posts to analyze
+    nsfw: bool = False  # Include NSFW content
+    
+    # Model configuration
+    model: str = "gemini-2.5-pro"
+    api_key: str  # LLM API key
+    
+    # Analysis configuration
+    system_prompt: str = """You are an expert social media analyst specializing in automotive discussions, particularly BMW motorcycles. Your task is to analyze Reddit discussions to identify only the most relevant and insightful comments worth highlighting."""
+    
+    # Output configuration
+    output_format: str = "json"
+    max_quote_length: int = 200
+
+
 class AnalysisMetadata(BaseModel):
     """Model for analysis metadata."""
 
@@ -60,6 +104,8 @@ class AnalysisMetadata(BaseModel):
     processing_time_seconds: float
     model_used: str
     api_calls_made: int
+    collection_method: str  # "subreddit" or "search"
+    cell_parsing_errors: int = 0  # New field for cell parsing issues
 
     class Config:
         json_encoders = {datetime: lambda v: v.isoformat()}

@@ -1,0 +1,230 @@
+"""
+Universal data cleaning functions for Reddit posts and comments.
+Works with both cell-based and flat object extraction formats.
+"""
+
+from datetime import datetime
+from typing import Dict, Any, List, Optional
+import re
+
+
+def clean_reddit_post_updated(extracted_post: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Takes an extracted post object (from cell parsing or flat object) and returns a clean, minimal post schema.
+    This function works with both extraction formats since they're normalized to the same structure.
+    """
+    return {
+        "post_id": extracted_post.get("id", ""),
+        "post_title": extracted_post.get("title", ""),
+        "post_content": extracted_post.get("selftext", ""),
+        "post_author": extracted_post.get("author", ""),
+        "post_score": extracted_post.get("score", 0),
+        "post_date": (
+            datetime.utcfromtimestamp(extracted_post["created_utc"])
+            if extracted_post.get("created_utc") else
+            datetime.utcnow()
+        ),
+        "subreddit": extracted_post.get("subreddit", ""),
+        "permalink": extracted_post.get("permalink", ""),
+        "url": extracted_post.get("url", ""),
+    }
+
+
+def clean_posts_comments_response(api_response: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Takes a posts/comments API response and returns a cleaned, nested comment tree.
+    Handles the commentForest.trees structure from the posts/comments endpoint.
+    """
+    # Extract comment forest from API response
+    comment_forest = api_response.get("data", {}).get("commentForest", {})
+    trees = comment_forest.get("trees", [])
+    
+    if not trees:
+        return []
+    
+    # Build a dict of all comments keyed by id
+    comments = {}
+    for tree in trees:
+        # Skip "more comments" placeholders (they have node: null)
+        if not tree.get("node"):
+            continue
+            
+        node = tree["node"]
+        comment_id = node.get("id")
+        
+        if not comment_id:
+            continue
+        
+        # Extract comment content with fallback handling
+        content = extract_comment_content(node.get("content", {}))
+        
+        # Extract author name
+        author_info = node.get("authorInfo", {})
+        author_name = author_info.get("name", "")
+        
+        # Handle deleted/removed comments
+        if node.get("isRemoved") or not content.strip():
+            content = "[deleted]"
+        
+        # Convert creation date
+        created_at = node.get("createdAt")
+        comment_date = datetime.utcnow()
+        if created_at:
+            try:
+                comment_date = datetime.fromisoformat(created_at.replace("+0000", "+00:00"))
+            except Exception:
+                pass
+                
+        comments[comment_id] = {
+            "id": comment_id,
+            "author": author_name if author_name and author_name not in ["[deleted]", "[removed]"] else "unknown",
+            "body": content,
+            "score": node.get("score", 0),
+            "date": comment_date,
+            "depth": tree.get("depth", 0),
+            "parentId": tree.get("parentId"),
+            "children": []
+        }
+    
+    # Build nested structure by attaching children to parents
+    roots = []
+    for comment in comments.values():
+        parent_id = comment["parentId"]
+        if parent_id and parent_id in comments:
+            comments[parent_id]["children"].append(comment)
+        else:
+            roots.append(comment)
+    
+    return roots
+
+
+def extract_comment_content(content_obj: Dict[str, Any]) -> str:
+    """
+    Extract text content from Reddit comment content object
+    """
+    if not content_obj:
+        return ""
+    
+    # Priority order: markdown > preview > html > empty
+    content_formats = ["markdown", "preview", "html"]
+    
+    for format_name in content_formats:
+        content = content_obj.get(format_name, "")
+        if content and content.strip():
+            # Clean HTML tags if present
+            if format_name == "html":
+                content = re.sub(r'<[^>]+>', '', content)
+                content = content.replace('&lt;', '<').replace('&gt;', '>').replace('&amp;', '&')
+                content = content.replace('&#39;', "'").replace('&quot;', '"')
+            return content.strip()
+    
+    return ""
+
+
+def clean_reddit_comment_tree_legacy(raw_comment_trees: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Legacy comment cleaner for backward compatibility.
+    Takes a Reddit comment 'forest' and returns a cleaned, nested comment tree.
+    """
+    if not raw_comment_trees:
+        return []
+    
+    # Build a dict of all comments keyed by id
+    comments = {}
+    for comment in raw_comment_trees:
+        node = comment.get("node", comment)
+        comment_id = node.get("id")
+        
+        if not comment_id:
+            continue
+            
+        comments[comment_id] = {
+            "id": comment_id,
+            "author": node.get("authorInfo", {}).get("name", "unknown"),
+            "body": node.get("content", {}).get("markdown", "") or node.get("body", ""),
+            "score": node.get("score", 0),
+            "date": (
+                datetime.fromisoformat(node["createdAt"])
+                if "createdAt" in node and node["createdAt"]
+                else datetime.utcnow()
+            ),
+            "depth": comment.get("depth", 0),
+            "parentId": comment.get("parentId"),
+            "children": []
+        }
+    
+    # Attach each comment to its parent's 'children'
+    roots = []
+    for comment in comments.values():
+        parent_id = comment["parentId"]
+        if parent_id and parent_id in comments:
+            comments[parent_id]["children"].append(comment)
+        else:
+            roots.append(comment)
+    
+    return roots
+
+
+def build_post_with_comments(clean_post: Dict[str, Any], clean_comments: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Combine a cleaned post and its comments tree into a single structure.
+    """
+    post_with_comments = clean_post.copy()
+    post_with_comments["comments"] = clean_comments
+    return post_with_comments
+
+
+def validate_comment_structure(comment_node: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Validate that required fields are present in comment node
+    """
+    validation_result = {
+        "is_valid": True,
+        "errors": [],
+        "warnings": []
+    }
+    
+    # Check required fields
+    required_fields = ["id", "content", "authorInfo", "score"]
+    for field in required_fields:
+        if field not in comment_node:
+            validation_result["errors"].append(f"Missing required field: {field}")
+            validation_result["is_valid"] = False
+    
+    # Check nested required fields
+    if comment_node.get("content"):
+        content = comment_node["content"]
+        if not any(content.get(fmt) for fmt in ["markdown", "preview", "html"]):
+            validation_result["warnings"].append("Comment content missing text in all formats")
+    
+    if comment_node.get("authorInfo") and not comment_node["authorInfo"].get("name"):
+        validation_result["warnings"].append("Author info missing name")
+    
+    # Check for removed/deleted content
+    if comment_node.get("isRemoved") or comment_node.get("isAdminTakedown"):
+        validation_result["warnings"].append("Comment appears to be removed or taken down")
+    
+    return validation_result
+
+
+def sanitize_reddit_content(content: str) -> str:
+    """
+    Sanitize Reddit content for safe processing
+    """
+    if not content:
+        return ""
+    
+    # Remove potential XSS content
+    content = re.sub(r'<script[^>]*>.*?</script>', '', content, flags=re.IGNORECASE | re.DOTALL)
+    content = re.sub(r'javascript:', '', content, flags=re.IGNORECASE)
+    
+    # Clean up common Reddit formatting artifacts
+    content = re.sub(r'\*\*(.*?)\*\*', r'\1', content)  # Remove bold markdown
+    content = re.sub(r'\*(.*?)\*', r'\1', content)  # Remove italic markdown
+    content = re.sub(r'~~(.*?)~~', r'\1', content)  # Remove strikethrough
+    
+    # Normalize whitespace
+    content = re.sub(r'\s+', ' ', content)
+    content = content.strip()
+    
+    return content 

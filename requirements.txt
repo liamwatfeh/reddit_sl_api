@@ -18,6 +18,11 @@ pandas
 python-dateutil
 pytz
 
+# Additional Reddit API Dependencies
+typing_extensions>=4.8.0
+aiofiles>=23.0.0
+tenacity>=8.2.0
+
 # Development Dependencies
 pytest
 pytest-asyncio
