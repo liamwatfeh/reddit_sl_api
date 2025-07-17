@@ -34,68 +34,138 @@ def clean_posts_comments_response(api_response: Dict[str, Any]) -> List[Dict[str
     """
     Takes a posts/comments API response and returns a cleaned, nested comment tree.
     Handles the commentForest.trees structure from the posts/comments endpoint.
+    Enhanced with comprehensive null safety checks.
     """
-    # Extract comment forest from API response
-    comment_forest = api_response.get("data", {}).get("commentForest", {})
-    trees = comment_forest.get("trees", [])
-    
-    if not trees:
-        return []
-    
-    # Build a dict of all comments keyed by id
-    comments = {}
-    for tree in trees:
-        # Skip "more comments" placeholders (they have node: null)
-        if not tree.get("node"):
-            continue
+    try:
+        # Handle None or empty api_response
+        if not api_response or not isinstance(api_response, dict):
+            print("API response is None or not a dict")
+            return []
+        
+        # Extract data object with null safety
+        data = api_response.get("data")
+        if not data or not isinstance(data, dict):
+            print("API response data is None or not a dict")
+            return []
             
-        node = tree["node"]
-        comment_id = node.get("id")
+        # Extract comment forest with null safety
+        comment_forest = data.get("commentForest")
+        if not comment_forest or not isinstance(comment_forest, dict):
+            print("Comment forest is None or not a dict")
+            return []
         
-        if not comment_id:
-            continue
+        # Extract trees array with null safety
+        trees = comment_forest.get("trees")
+        if not trees or not isinstance(trees, list):
+            print("Trees is None or not a list")
+            return []
         
-        # Extract comment content with fallback handling
-        content = extract_comment_content(node.get("content", {}))
+        print(f"Processing {len(trees)} trees from comment forest")
         
-        # Extract author name
-        author_info = node.get("authorInfo", {})
-        author_name = author_info.get("name", "")
+        # Build a dict of all comments keyed by id
+        comments = {}
+        processed_count = 0
         
-        # Handle deleted/removed comments
-        if node.get("isRemoved") or not content.strip():
-            content = "[deleted]"
-        
-        # Convert creation date
-        created_at = node.get("createdAt")
-        comment_date = datetime.utcnow()
-        if created_at:
+        for i, tree in enumerate(trees):
             try:
-                comment_date = datetime.fromisoformat(created_at.replace("+0000", "+00:00"))
-            except Exception:
-                pass
+                # Validate tree object
+                if not tree or not isinstance(tree, dict):
+                    print(f"Tree {i} is None or not a dict, skipping")
+                    continue
                 
-        comments[comment_id] = {
-            "id": comment_id,
-            "author": author_name if author_name and author_name not in ["[deleted]", "[removed]"] else "unknown",
-            "body": content,
-            "score": node.get("score", 0),
-            "date": comment_date,
-            "depth": tree.get("depth", 0),
-            "parentId": tree.get("parentId"),
-            "children": []
-        }
-    
-    # Build nested structure by attaching children to parents
-    roots = []
-    for comment in comments.values():
-        parent_id = comment["parentId"]
-        if parent_id and parent_id in comments:
-            comments[parent_id]["children"].append(comment)
-        else:
-            roots.append(comment)
-    
-    return roots
+                # Skip "more comments" placeholders (they have node: null)
+                node = tree.get("node")
+                if not node or not isinstance(node, dict):
+                    print(f"Tree {i} has None or invalid node, skipping")
+                    continue
+                
+                # Extract comment ID with null safety
+                comment_id = node.get("id")
+                if not comment_id or not isinstance(comment_id, str):
+                    print(f"Tree {i} node missing valid ID, skipping")
+                    continue
+                
+                # Extract comment content with null safety
+                content_obj = node.get("content")
+                if content_obj and isinstance(content_obj, dict):
+                    content = extract_comment_content(content_obj)
+                else:
+                    content = ""
+                
+                # Extract author name with null safety
+                author_info = node.get("authorInfo")
+                author_name = ""
+                if author_info and isinstance(author_info, dict):
+                    author_name = author_info.get("name", "")
+                    if not isinstance(author_name, str):
+                        author_name = ""
+                
+                # Handle deleted/removed comments
+                is_removed = node.get("isRemoved", False)
+                if is_removed or not content.strip():
+                    content = "[deleted]"
+                
+                # Convert creation date with null safety
+                created_at = node.get("createdAt")
+                comment_date = datetime.utcnow()
+                if created_at and isinstance(created_at, str):
+                    try:
+                        comment_date = datetime.fromisoformat(created_at.replace("+0000", "+00:00"))
+                    except Exception as date_error:
+                        print(f"Date parsing error for comment {comment_id}: {date_error}")
+                        pass
+                
+                # Extract score with null safety
+                score = node.get("score", 0)
+                if not isinstance(score, (int, float)):
+                    score = 0
+                
+                # Extract depth and parentId with null safety
+                depth = tree.get("depth", 0)
+                if not isinstance(depth, (int, float)):
+                    depth = 0
+                
+                parent_id = tree.get("parentId")
+                if parent_id and not isinstance(parent_id, str):
+                    parent_id = None
+                
+                # Store cleaned comment
+                comments[comment_id] = {
+                    "id": comment_id,
+                    "author": author_name if author_name and author_name not in ["[deleted]", "[removed]"] else "unknown",
+                    "body": content,
+                    "score": int(score),
+                    "date": comment_date,
+                    "depth": int(depth),
+                    "parentId": parent_id,
+                    "children": []
+                }
+                processed_count += 1
+                
+            except Exception as tree_error:
+                print(f"Error processing tree {i}: {tree_error}")
+                continue
+        
+        print(f"Successfully processed {processed_count} comments out of {len(trees)} trees")
+        
+        # Build nested structure by attaching children to parents
+        roots = []
+        for comment in comments.values():
+            parent_id = comment["parentId"]
+            if parent_id and parent_id in comments:
+                comments[parent_id]["children"].append(comment)
+            else:
+                roots.append(comment)
+        
+        print(f"Built comment tree with {len(roots)} root comments")
+        return roots
+        
+    except Exception as e:
+        # Log error and return empty list instead of None
+        print(f"Error processing comments response: {e}")
+        import traceback
+        traceback.print_exc()
+        return []
 
 
 def extract_comment_content(content_obj: Dict[str, Any]) -> str:
@@ -169,6 +239,10 @@ def build_post_with_comments(clean_post: Dict[str, Any], clean_comments: List[Di
     """
     Combine a cleaned post and its comments tree into a single structure.
     """
+    # Handle case where clean_comments might be None
+    if clean_comments is None:
+        clean_comments = []
+    
     post_with_comments = clean_post.copy()
     post_with_comments["comments"] = clean_comments
     return post_with_comments

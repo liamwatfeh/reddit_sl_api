@@ -19,7 +19,7 @@ from ..models.schemas import (
     PostWithComments,
 )
 from ..services.reddit_collector import SubredditDataCollector, SearchDataCollector
-from ..agents.comment_analyzer import get_comment_analyzer, AnalysisContext
+from ..agents.comment_analyzer import get_orchestrator, AnalysisContext
 
 # Initialize router, logger, and settings
 router = APIRouter()
@@ -95,7 +95,6 @@ async def analyze_reddit_comments(
                     time=request.timeframe,
                     limit=request.limit,
                     model=request.model,
-                    api_key=request.api_key,  # Will be ignored in processing
                     system_prompt=request.system_prompt
                 )
                 
@@ -109,12 +108,11 @@ async def analyze_reddit_comments(
                     
                     # Count total comments
                     for post in posts:
-                        total_comments_found += len(post.comments)
+                        total_comments_found += len(post["comments"])
                     
                     # Analyze comments using AI
                     # Note: We ignore the api_key from the request and use environment variables
                     context = AnalysisContext(
-                        keywords=request.keywords,
                         system_prompt=request.system_prompt,
                         max_comments_per_post=50
                     )
@@ -190,61 +188,26 @@ async def analyze_subreddit(
     try:
         start_time = datetime.now()
         
-        # Initialize services
-        analyzer = get_comment_analyzer()
-        
+        # Phase 1: Data Collection
         async with SubredditDataCollector() as collector:
-            # Collect posts from subreddit
             logger.info(f"Collecting posts from r/{request.subreddit}")
             
-            posts, metadata = await collector.collect_subreddit_posts(request)
-            
-            api_calls_made = metadata.get("api_calls_made", 0)
-            cell_parsing_errors = metadata.get("cell_parsing_errors", 0)
+            posts, collection_metadata = await collector.collect_subreddit_posts(request)
             
             logger.info(f"Collected {len(posts)} posts from r/{request.subreddit}")
-            
-            # Count total comments
-            total_comments_found = sum(len(post.comments) for post in posts)
-            
-            # Analyze comments using AI
-            # Note: We ignore the api_key from the request and use environment variables
-            context = AnalysisContext(
-                keywords=[request.subreddit],  # Use subreddit name as context
-                system_prompt=request.system_prompt,
-                max_comments_per_post=50
-            )
-            
-            analysis_results = await analyzer.analyze_multiple_posts(posts, context)
-            
-            # Collect all analyzed comments
-            all_comments = []
-            for result in analysis_results:
-                all_comments.extend(result.analyzed_comments)
+            logger.info(f"Total comments found: {sum(len(post['comments']) for post in posts)}")
 
-        processing_time = (datetime.now() - start_time).total_seconds()
-
-        # Create response metadata
-        response_metadata = AnalysisMetadata(
-            total_posts_analyzed=len(posts),
-            total_comments_found=total_comments_found,
-            relevant_comments_extracted=len(all_comments),
-            irrelevant_posts=max(0, len(posts) - len([r for r in analysis_results if r.analyzed_comments])),
-            analysis_timestamp=datetime.now(),
-            processing_time_seconds=processing_time,
-            model_used=request.model,
-            api_calls_made=api_calls_made,
-            collection_method="subreddit",
-            cell_parsing_errors=cell_parsing_errors
-        )
-
-        response = UnifiedAnalysisResponse(
-            comment_analyses=all_comments, 
-            metadata=response_metadata
+        # Phase 2: AI Analysis & Response Building (via Orchestrator)
+        logger.info("Starting AI analysis pipeline via orchestrator")
+        orchestrator = get_orchestrator()
+        response = await orchestrator.run_full_analysis(
+            posts=posts,
+            analysis_request=request,
+            collection_metadata=collection_metadata
         )
 
         logger.info(
-            f"Subreddit analysis completed: {len(all_comments)} comments analyzed from {len(posts)} posts"
+            f"Subreddit analysis completed: {len(response.comment_analyses)} relevant comments from {response.metadata.total_posts_analyzed} posts"
         )
         return response
 
@@ -280,60 +243,26 @@ async def analyze_search(
     try:
         start_time = datetime.now()
         
-        # Initialize services
-        analyzer = get_comment_analyzer()
-        
+        # Phase 1: Data Collection
         async with SearchDataCollector() as collector:
-            # Search for posts
             logger.info(f"Searching Reddit for: {request.query}")
             
-            posts, metadata = await collector.collect_search_posts(request)
-            
-            api_calls_made = metadata.get("api_calls_made", 0)
+            posts, collection_metadata = await collector.collect_search_posts(request)
             
             logger.info(f"Found {len(posts)} posts for query: {request.query}")
-            
-            # Count total comments
-            total_comments_found = sum(len(post.comments) for post in posts)
-            
-            # Analyze comments using AI
-            # Note: We ignore the api_key from the request and use environment variables
-            context = AnalysisContext(
-                keywords=[request.query],
-                system_prompt=request.system_prompt,
-                max_comments_per_post=50
-            )
-            
-            analysis_results = await analyzer.analyze_multiple_posts(posts, context)
-            
-            # Collect all analyzed comments
-            all_comments = []
-            for result in analysis_results:
-                all_comments.extend(result.analyzed_comments)
+            logger.info(f"Total comments found: {sum(len(post['comments']) for post in posts)}")
 
-        processing_time = (datetime.now() - start_time).total_seconds()
-
-        # Create response metadata
-        response_metadata = AnalysisMetadata(
-            total_posts_analyzed=len(posts),
-            total_comments_found=total_comments_found,
-            relevant_comments_extracted=len(all_comments),
-            irrelevant_posts=max(0, len(posts) - len([r for r in analysis_results if r.analyzed_comments])),
-            analysis_timestamp=datetime.now(),
-            processing_time_seconds=processing_time,
-            model_used=request.model,
-            api_calls_made=api_calls_made,
-            collection_method="search",
-            cell_parsing_errors=0  # Search endpoint doesn't use cell structure
-        )
-
-        response = UnifiedAnalysisResponse(
-            comment_analyses=all_comments, 
-            metadata=response_metadata
+        # Phase 2: AI Analysis & Response Building (via Orchestrator)
+        logger.info("Starting AI analysis pipeline via orchestrator")
+        orchestrator = get_orchestrator()
+        response = await orchestrator.run_full_analysis(
+            posts=posts,
+            analysis_request=request,
+            collection_metadata=collection_metadata
         )
 
         logger.info(
-            f"Search analysis completed: {len(all_comments)} comments analyzed from {len(posts)} posts"
+            f"Search analysis completed: {len(response.comment_analyses)} relevant comments from {response.metadata.total_posts_analyzed} posts"
         )
         return response
 

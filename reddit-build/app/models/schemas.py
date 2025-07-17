@@ -45,8 +45,7 @@ class ConfigurableAnalysisRequest(BaseModel):
     subreddits: List[str] = ["motorcycles", "BMW"]
     timeframe: str = "week"
     limit: int = 10
-    model: str = "gemini-2.5-pro"
-    api_key: str
+    model: str = "gpt-4.1-2025-04-14"
     system_prompt: str = "You are an expert social media analyst..."
     output_format: str = "json"
     max_quote_length: int = 200
@@ -61,11 +60,10 @@ class SubredditAnalysisRequest(BaseModel):
     limit: int = 50  # Number of posts to analyze
     
     # Model configuration
-    model: str = "gemini-2.5-pro"
-    api_key: str  # LLM API key
+    model: str = "gpt-4.1-2025-04-14"
     
     # Analysis configuration
-    system_prompt: str = """You are an expert social media analyst specializing in automotive discussions, particularly BMW motorcycles. Your task is to analyze Reddit discussions to identify only the most relevant and insightful comments worth highlighting."""
+    system_prompt: str = """You are an expert social media analyst specializing in Reddit comment analysis. Your task is to analyze Reddit discussions to identify insightful comments, understand sentiment patterns, and extract meaningful themes from user conversations."""
     
     # Output configuration
     output_format: str = "json"
@@ -82,11 +80,10 @@ class SearchAnalysisRequest(BaseModel):
     nsfw: bool = False  # Include NSFW content
     
     # Model configuration
-    model: str = "gemini-2.5-pro"
-    api_key: str  # LLM API key
+    model: str = "gpt-4.1-2025-04-14"
     
     # Analysis configuration
-    system_prompt: str = """You are an expert social media analyst specializing in automotive discussions, particularly BMW motorcycles. Your task is to analyze Reddit discussions to identify only the most relevant and insightful comments worth highlighting."""
+    system_prompt: str = """You are an expert social media analyst specializing in Reddit comment analysis. Your task is to analyze Reddit discussions to identify insightful comments, understand sentiment patterns, and extract meaningful themes from user conversations."""
     
     # Output configuration
     output_format: str = "json"

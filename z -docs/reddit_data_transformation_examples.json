@@ -1,0 +1,421 @@
+# Reddit Comment Analysis API - Complete Data Transformation Examples
+
+## STAGE 1: INITIAL REQUESTS
+
+### Subreddit Analysis Request (/analyze-subreddit)
+```json
+{
+  "subreddit": "motorcycles",
+  "sort": "hot",
+  "time": "week", 
+  "limit": 50,
+  "model": "gemini-2.5-pro",
+  "api_key": "your-gemini-api-key",
+  "system_prompt": "You are an expert social media analyst specializing in automotive discussions, particularly BMW motorcycles. Your task is to analyze Reddit discussions to identify only the most relevant and insightful comments worth highlighting.",
+  "output_format": "json",
+  "max_quote_length": 200
+}
+```
+
+### Search Analysis Request (/analyze-search)
+```json
+{
+  "query": "BMW R12",
+  "sort": "relevance",
+  "time": "week",
+  "limit": 50,
+  "nsfw": false,
+  "model": "gemini-2.5-pro", 
+  "api_key": "your-gemini-api-key",
+  "system_prompt": "You are an expert social media analyst specializing in automotive discussions, particularly BMW motorcycles. Your task is to analyze Reddit discussions to identify only the most relevant and insightful comments worth highlighting.",
+  "output_format": "json",
+  "max_quote_length": 200
+}
+```
+
+## STAGE 2: RAW API RESPONSES
+
+### Subreddit Path: Raw subreddit/search Response (Cell-Based)
+```json
+{
+  "data": [
+    {
+      "__typename": "CellGroup",
+      "id": "dDNfMWV1dGVjMQ==",
+      "groupId": "t3_1eutec1",
+      "payload": null,
+      "adPayload": null,
+      "cells": [
+        {
+          "__typename": "MetadataCell",
+          "id": "MetadataCell-t3_1eutec1",
+          "createdAt": "2024-08-17T22:07:23.801000+0000",
+          "authorName": "u/evilv3",
+          "detailsString": "u/evilv3",
+          "iconPath": "https://styles.redditmedia.com/t5_c3bk0/styles/profileIcon_snoo.png",
+          "iconShape": "ROUND"
+        },
+        {
+          "__typename": "TitleCell", 
+          "id": "TitleCell-t3_1eutec1",
+          "title": "Amazon driver breaks through motorcyclist blockade",
+          "isVisited": false
+        },
+        {
+          "__typename": "ActionCell",
+          "id": "ActionCell-t3_1eutec1",
+          "isScoreHidden": false,
+          "commentCount": 10265,
+          "score": 75798,
+          "voteState": "NONE",
+          "shareCount": 18135
+        }
+      ]
+    }
+  ],
+  "status": true,
+  "message": "Successful",
+  "meta": {
+    "nextPage": "dDNfMWV1dGVjMQ=="
+  }
+}
+```
+
+### Search Path: Raw posts/search-posts Response (Flat Objects)
+```json
+{
+  "data": [
+    {
+      "__typename": "SubredditPost",
+      "id": "t3_1dyxu5j",
+      "createdAt": "2024-07-09T09:07:41.021000+0000",
+      "postTitle": "Gaming in your 30s",
+      "url": "https://i.redd.it/j61cz68klgbd1.jpeg",
+      "content": {
+        "markdown": "I just bought a gaming pc and monitor and now Im planing to play a Game for first time in my life (besides phone gaming). what game should I start with?",
+        "html": "<div class=\"md\"><p>I just bought a gaming pc and monitor and now Im planing to play a Game for first time in my life (besides phone gaming). what game should I start with?</p></div>",
+        "preview": "I just bought a gaming pc and monitor and now Im planing to play a Game for first time in my life (besides phone gaming). what game should I start with?"
+      },
+      "score": 21700,
+      "commentCount": 1026,
+      "authorInfo": {
+        "__typename": "Redditor",
+        "id": "t2_2nr0qevj",
+        "name": "Hoppy_Doodle",
+        "newIcon": {
+          "url": "https://preview.redd.it/snoovatar/avatars/nftv2_bmZ0X2VpcDE1NToxMzdfNDUz.png"
+        }
+      },
+      "subreddit": {
+        "__typename": "Subreddit",
+        "id": "t5_2qh03",
+        "name": "gaming",
+        "prefixedName": "r/gaming",
+        "title": "r/gaming"
+      },
+      "permalink": "/r/gaming/comments/1dyxu5j/gaming_in_your_30s/"
+    }
+  ],
+  "status": true,
+  "message": "Successful",
+  "meta": {
+    "nextPage": "MjQ="
+  }
+}
+```
+
+## STAGE 3: EXTRACTED POSTS (After Processing - Both Paths Converge)
+
+### Subreddit Path: After extract_posts_from_reddit_response() and extract_post_from_cells()
+### Search Path: After extract_posts_from_search_response() and extract_search_post_data()
+
+**Both paths produce identical standardized post objects:**
+
+```json
+[
+  {
+    "id": "1eutec1",
+    "title": "Amazon driver breaks through motorcyclist blockade", 
+    "selftext": "",
+    "author": "evilv3",
+    "score": 75798,
+    "num_comments": 10265,
+    "created_utc": 1723937243,
+    "permalink": "/r/motorcycles/comments/1eutec1/",
+    "url": "https://www.reddit.com/r/motorcycles/comments/1eutec1/",
+    "subreddit": "motorcycles"
+  },
+  {
+    "id": "1dyxu5j",
+    "title": "Gaming in your 30s",
+    "selftext": "I just bought a gaming pc and monitor and now Im planing to play a Game for first time in my life (besides phone gaming). what game should I start with?",
+    "author": "Hoppy_Doodle", 
+    "score": 21700,
+    "num_comments": 1026,
+    "created_utc": 1720511261,
+    "permalink": "/r/gaming/comments/1dyxu5j/gaming_in_your_30s/",
+    "url": "https://www.reddit.com/r/gaming/comments/1dyxu5j/gaming_in_your_30s/",
+    "subreddit": "gaming"
+  }
+]
+```
+
+### After clean_reddit_post_updated() - Final Standardized Format
+```json
+[
+  {
+    "post_id": "1eutec1",
+    "post_title": "Amazon driver breaks through motorcyclist blockade",
+    "post_content": "",
+    "post_author": "evilv3", 
+    "post_score": 75798,
+    "post_date": "2024-08-17T22:07:23.801000+00:00",
+    "subreddit": "motorcycles",
+    "permalink": "/r/motorcycles/comments/1eutec1/",
+    "url": "https://www.reddit.com/r/motorcycles/comments/1eutec1/"
+  }
+]
+```
+
+## STAGE 4: RAW COMMENTS RESPONSE (posts/comments API)
+
+### Raw Response from posts/comments?postId=1eutec1&sort=confidence
+```json
+{
+  "data": {
+    "__typename": "SubredditPost",
+    "id": "t3_1eutec1",
+    "title": "Amazon driver breaks through motorcyclist blockade",
+    "subreddit": {
+      "id": "t5_2qi6d",
+      "name": "motorcycles",
+      "prefixedName": "r/motorcycles"
+    },
+    "commentForest": {
+      "__typename": "CommentForest",
+      "trees": [
+        {
+          "depth": 0,
+          "more": null,
+          "parentId": null,
+          "node": {
+            "__typename": "Comment",
+            "id": "t1_lcbyyap",
+            "createdAt": "2024-08-17T23:48:29.125000+0000",
+            "content": {
+              "__typename": "Content",
+              "markdown": "That driver had places to be and wasn't going to let a bunch of bikers slow him down. Respect.",
+              "html": "<div class=\"md\"><p>That driver had places to be and wasn't going to let a bunch of bikers slow him down. Respect.</p></div>",
+              "preview": "That driver had places to be and wasn't going to let a bunch of bikers slow him down. Respect."
+            },
+            "authorInfo": {
+              "__typename": "Redditor",
+              "id": "t2_q8wyus1c",
+              "name": "BikerHater2024"
+            },
+            "score": 3157,
+            "voteState": "NONE",
+            "permalink": "/r/motorcycles/comments/1eutec1/amazon_driver_breaks_through_motorcyclist_blockade/lcbyyap/"
+          },
+          "childCount": 124
+        },
+        {
+          "depth": 1,
+          "more": null,
+          "parentId": "t1_lcbyyap",
+          "node": {
+            "__typename": "Comment",
+            "id": "t1_lccitza",
+            "createdAt": "2024-08-18T01:25:18.592000+0000",
+            "content": {
+              "__typename": "Content",
+              "markdown": "I ride a BMW R1250GS and honestly this kind of behavior from groups gives all of us a bad name. The driver was just trying to do his job.",
+              "html": "<div class=\"md\"><p>I ride a BMW R1250GS and honestly this kind of behavior from groups gives all of us a bad name. The driver was just trying to do his job.</p></div>",
+              "preview": "I ride a BMW R1250GS and honestly this kind of behavior from groups gives all of us a bad name. The driver was just trying to do his job."
+            },
+            "authorInfo": {
+              "__typename": "Redditor",
+              "id": "t2_93eiv",
+              "name": "BMWRider_fritz"
+            },
+            "score": 2841,
+            "voteState": "NONE",
+            "permalink": "/r/motorcycles/comments/1eutec1/amazon_driver_breaks_through_motorcyclist_blockade/lccitza/"
+          },
+          "childCount": 27
+        }
+      ]
+    },
+    "commentCount": 10265
+  },
+  "status": true,
+  "message": "Successful"
+}
+```
+
+## STAGE 5: CLEANED COMMENTS (After clean_posts_comments_response())
+
+### Nested Comment Tree Structure
+```json
+[
+  {
+    "id": "t1_lcbyyap",
+    "author": "BikerHater2024",
+    "body": "That driver had places to be and wasn't going to let a bunch of bikers slow him down. Respect.",
+    "score": 3157,
+    "date": "2024-08-17T23:48:29.125000+00:00",
+    "depth": 0,
+    "parentId": null,
+    "children": [
+      {
+        "id": "t1_lccitza", 
+        "author": "BMWRider_fritz",
+        "body": "I ride a BMW R1250GS and honestly this kind of behavior from groups gives all of us a bad name. The driver was just trying to do his job.",
+        "score": 2841,
+        "date": "2024-08-18T01:25:18.592000+00:00",
+        "depth": 1,
+        "parentId": "t1_lcbyyap",
+        "children": []
+      }
+    ]
+  }
+]
+```
+
+### Complete PostWithComments Object (Ready for AI Analysis)
+```json
+{
+  "post_id": "1eutec1",
+  "post_title": "Amazon driver breaks through motorcyclist blockade",
+  "post_content": "",
+  "post_author": "evilv3",
+  "post_score": 75798,
+  "post_date": "2024-08-17T22:07:23.801000+00:00",
+  "subreddit": "motorcycles",
+  "permalink": "/r/motorcycles/comments/1eutec1/",
+  "url": "https://www.reddit.com/r/motorcycles/comments/1eutec1/",
+  "comments": [
+    {
+      "id": "t1_lcbyyap",
+      "author": "BikerHater2024",
+      "body": "That driver had places to be and wasn't going to let a bunch of bikers slow him down. Respect.",
+      "score": 3157,
+      "date": "2024-08-17T23:48:29.125000+00:00",
+      "depth": 0,
+      "parentId": null,
+      "children": [
+        {
+          "id": "t1_lccitza",
+          "author": "BMWRider_fritz", 
+          "body": "I ride a BMW R1250GS and honestly this kind of behavior from groups gives all of us a bad name. The driver was just trying to do his job.",
+          "score": 2841,
+          "date": "2024-08-18T01:25:18.592000+00:00",
+          "depth": 1,
+          "parentId": "t1_lcbyyap",
+          "children": []
+        }
+      ]
+    }
+  ]
+}
+```
+
+## STAGE 6: AI ANALYSIS RESULTS
+
+### Individual CommentAnalysis Objects (Output from AI Agent)
+```json
+[
+  {
+    "post_id": "1eutec1",
+    "post_url": "https://www.reddit.com/r/motorcycles/comments/1eutec1/",
+    "quote": "I ride a BMW R1250GS and honestly this kind of behavior from groups gives all of us a bad name. The driver was just trying to do his job.",
+    "sentiment": "negative",
+    "theme": "experience",
+    "purchase_intent": "none",
+    "date": "2024-08-18T01:25:18.592000+00:00",
+    "source": "reddit"
+  },
+  {
+    "post_id": "1eutec1", 
+    "post_url": "https://www.reddit.com/r/motorcycles/comments/1eutec1/",
+    "quote": "That driver had places to be and wasn't going to let a bunch of bikers slow him down. Respect.",
+    "sentiment": "positive",
+    "theme": "experience",
+    "purchase_intent": "none",
+    "date": "2024-08-17T23:48:29.125000+00:00",
+    "source": "reddit"
+  }
+]
+```
+
+## STAGE 7: FINAL UNIFIED RESPONSE
+
+### Complete UnifiedAnalysisResponse (Final API Output)
+```json
+{
+  "comment_analyses": [
+    {
+      "post_id": "1eutec1",
+      "post_url": "https://www.reddit.com/r/motorcycles/comments/1eutec1/",
+      "quote": "I ride a BMW R1250GS and honestly this kind of behavior from groups gives all of us a bad name. The driver was just trying to do his job.",
+      "sentiment": "negative",
+      "theme": "experience", 
+      "purchase_intent": "none",
+      "date": "2024-08-18T01:25:18.592000+00:00",
+      "source": "reddit"
+    },
+    {
+      "post_id": "1eutec1",
+      "post_url": "https://www.reddit.com/r/motorcycles/comments/1eutec1/",
+      "quote": "That driver had places to be and wasn't going to let a bunch of bikers slow him down. Respect.",
+      "sentiment": "positive",
+      "theme": "experience",
+      "purchase_intent": "none", 
+      "date": "2024-08-17T23:48:29.125000+00:00",
+      "source": "reddit"
+    },
+    {
+      "post_id": "1dyxu5j",
+      "post_url": "https://www.reddit.com/r/gaming/comments/1dyxu5j/gaming_in_your_30s/",
+      "quote": "Yeah get used to solo gaming, it's easier than trying and failing to get any of them back",
+      "sentiment": "neutral",
+      "theme": "experience",
+      "purchase_intent": "low",
+      "date": "2024-07-09T10:48:29.125000+00:00",
+      "source": "reddit"
+    }
+  ],
+  "metadata": {
+    "total_posts_analyzed": 50,
+    "total_comments_found": 15291,
+    "relevant_comments_extracted": 23,
+    "irrelevant_posts": 27,
+    "analysis_timestamp": "2024-08-18T14:30:45.123000+00:00",
+    "processing_time_seconds": 45.67,
+    "model_used": "gemini-2.5-pro",
+    "api_calls_made": 53,
+    "collection_method": "subreddit",
+    "cell_parsing_errors": 0
+  }
+}
+```
+
+## KEY TRANSFORMATION FUNCTIONS
+
+### Subreddit Path Processing Functions:
+1. **extract_posts_from_reddit_response()** - Filters CellGroups from raw response
+2. **extract_post_from_cells()** - Parses cell arrays into post objects  
+3. **clean_reddit_post_updated()** - Standardizes post format
+4. **clean_posts_comments_response()** - Converts comment trees to nested structure
+
+### Search Path Processing Functions:
+1. **extract_posts_from_search_response()** - Extracts SubredditPost objects
+2. **extract_search_post_data()** - Direct field extraction from flat objects
+3. **clean_reddit_post_updated()** - Same standardization as subreddit path
+4. **clean_posts_comments_response()** - Same comment processing
+
+### Common Processing Functions:
+1. **CommentFilteringAgent.analyze_post_for_comments()** - AI analysis of posts+comments
+2. **ResultsStacker.stack_comment_analyses()** - Combines all results into unified response
+
+This complete data transformation map shows exactly how data flows through your API at each stage, making it easy to understand the processing pipeline and debug any issues.

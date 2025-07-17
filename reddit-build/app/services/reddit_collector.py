@@ -17,13 +17,9 @@ from app.models.schemas import SubredditAnalysisRequest, SearchAnalysisRequest, 
 from app.services.cell_extractors import extract_posts_from_reddit_response
 from app.services.search_extractors import extract_posts_from_search_response
 from app.services.data_cleaners import clean_posts_comments_response, build_post_with_comments
+from app.core.exceptions import RedditAPIException, DataExtractionException
 
 logger = logging.getLogger(__name__)
-
-
-class RedditAPIError(Exception):
-    """Custom exception for Reddit API errors"""
-    pass
 
 
 class BaseRedditDataCollector:
@@ -56,7 +52,10 @@ class BaseRedditDataCollector:
     async def _init_client(self):
         """Initialize the HTTP client with proper configuration"""
         if not self.settings.rapid_api_key:
-            raise RedditAPIError("RapidAPI key not configured. Please set RAPID_API_KEY in your environment.")
+            raise RedditAPIException(
+                message="RapidAPI key not configured. Please set RAPID_API_KEY in your environment.",
+                debug_info={"config_check": "rapid_api_key_missing"}
+            )
         
         self.client = httpx.AsyncClient(
             headers=self.headers,
@@ -86,34 +85,113 @@ class BaseRedditDataCollector:
             logger.info(f"Making request to: {endpoint} with params: {params}")
             response = await self.client.get(url, params=params)
             
-            # Handle specific HTTP errors
+            # Handle specific HTTP errors with detailed debug info
             if response.status_code == 401:
-                raise RedditAPIError("Authentication failed. Check your RapidAPI key.")
+                raise RedditAPIException(
+                    message="Authentication failed. Check your RapidAPI key.",
+                    endpoint=endpoint,
+                    debug_info={
+                        "status_code": 401,
+                        "url": url,
+                        "headers_sent": dict(self.headers),
+                        "response_text": response.text[:500]
+                    }
+                )
             elif response.status_code == 403:
-                raise RedditAPIError("Access forbidden. Check API permissions.")
+                raise RedditAPIException(
+                    message="Access forbidden. Check API permissions.",
+                    endpoint=endpoint,
+                    debug_info={
+                        "status_code": 403,
+                        "url": url,
+                        "params": params,
+                        "response_text": response.text[:500]
+                    }
+                )
             elif response.status_code == 429:
-                raise RedditAPIError("Rate limit exceeded. Please try again later.")
+                raise RedditAPIException(
+                    message="Rate limit exceeded. Please try again later.",
+                    endpoint=endpoint,
+                    status_code=429,
+                    debug_info={
+                        "status_code": 429,
+                        "url": url,
+                        "retry_after": response.headers.get("Retry-After", "unknown"),
+                        "response_text": response.text[:500]
+                    }
+                )
             elif response.status_code == 404:
-                logger.warning(f"Resource not found: {endpoint}")
-                return {"data": [], "meta": {}}
+                logger.warning(f"Resource not found: {endpoint} - URL: {url}")
+                raise RedditAPIException(
+                    message=f"Reddit resource not found: {endpoint}",
+                    endpoint=endpoint,
+                    status_code=404,
+                    debug_info={
+                        "status_code": 404,
+                        "url": url,
+                        "params": params,
+                        "response_text": response.text[:500]
+                    }
+                )
             
             response.raise_for_status()
             
             # Parse JSON response
             try:
                 data = response.json()
-                logger.info(f"Request successful. Response size: {len(str(data))}")
+                logger.info(f"Request successful to {endpoint}. Response size: {len(str(data))}")
+                
+                # Check if response has expected data structure
+                if not isinstance(data, dict):
+                    raise DataExtractionException(
+                        message="Unexpected response format from Reddit API",
+                        phase="json_parsing",
+                        debug_info={
+                            "url": url,
+                            "response_type": type(data).__name__,
+                            "response_preview": str(data)[:200]
+                        }
+                    )
+                
                 return data
+                
             except json.JSONDecodeError as e:
-                logger.error(f"Failed to parse JSON response: {e}")
-                raise RedditAPIError(f"Invalid JSON response: {e}")
+                logger.error(f"Failed to parse JSON response from {endpoint}: {e}")
+                raise RedditAPIException(
+                    message="Invalid JSON response from Reddit API",
+                    endpoint=endpoint,
+                    debug_info={
+                        "url": url,
+                        "json_error": str(e),
+                        "response_text": response.text[:500],
+                        "content_type": response.headers.get("content-type")
+                    }
+                )
                 
         except httpx.RequestError as e:
-            logger.error(f"Request failed: {e}")
-            raise RedditAPIError(f"Network request failed: {e}")
+            logger.error(f"Network request failed to {endpoint}: {e}")
+            raise RedditAPIException(
+                message="Network connection failed to Reddit API",
+                endpoint=endpoint,
+                debug_info={
+                    "url": url,
+                    "network_error": str(e),
+                    "error_type": type(e).__name__
+                }
+            )
         except httpx.HTTPStatusError as e:
-            logger.error(f"HTTP error {e.response.status_code}: {e.response.text}")
-            raise RedditAPIError(f"HTTP {e.response.status_code}: {e.response.text}")
+            logger.error(f"HTTP error {e.response.status_code} for {endpoint}: {e.response.text}")
+            raise RedditAPIException(
+                message=f"Reddit API returned error status {e.response.status_code}",
+                endpoint=endpoint,
+                status_code=e.response.status_code,
+                debug_info={
+                    "url": url,
+                    "status_code": e.response.status_code,
+                    "response_text": e.response.text[:500],
+                    "params": params
+                }
+            )
     
     async def fetch_subreddit_posts(
         self, 
@@ -136,11 +214,12 @@ class BaseRedditDataCollector:
         Returns:
             Raw Reddit API response with CellGroup structure
         """
-        endpoint = f"/subreddit/{subreddit}"
+        endpoint = "/subreddit/search"
         
         params = {
+            "query": subreddit,
             "sort": sort,
-            "t": time,
+            "time": time,
             "limit": min(limit, 100),  # API limit
         }
         
@@ -151,7 +230,7 @@ class BaseRedditDataCollector:
             response = await self._make_request(endpoint, params)
             logger.info(f"Fetched {len(response.get('data', []))} items from r/{subreddit}")
             return response
-        except RedditAPIError as e:
+        except RedditAPIException as e:
             logger.error(f"Failed to fetch subreddit posts: {e}")
             raise
     
@@ -195,25 +274,29 @@ class BaseRedditDataCollector:
             response = await self._make_request(endpoint, params)
             logger.info(f"Found {len(response.get('data', []))} search results for: {query}")
             return response
-        except RedditAPIError as e:
+        except RedditAPIException as e:
             logger.error(f"Failed to search posts: {e}")
             raise
     
-    async def fetch_comment_tree(self, post_id: str, sort: str = "best") -> Dict[str, Any]:
+    async def fetch_comment_tree(self, post_id: str, sort: str = "TOP") -> Dict[str, Any]:
         """
         Fetch all comments for a specific post
         
         Args:
             post_id: Reddit post ID (without t3_ prefix)
-            sort: Comment sort method ("best", "top", "new", "controversial", "old", "qa")
+            sort: Comment sort method (GraphQL enum: "TOP", "NEW", "HOT", "CONTROVERSIAL", "OLD")
             
         Returns:
             Raw Reddit API response with comment tree structure
         """
-        endpoint = f"/posts/{post_id}/comments"
+        endpoint = "/posts/comments"
+        
+        # Ensure sort parameter is uppercase for GraphQL enum
+        sort_value = sort.upper() if sort else "TOP"
         
         params = {
-            "sort": sort,
+            "postId": f"t3_{post_id}",  # Post ID with required t3_ prefix
+            "sort": sort_value,
             "limit": 500,  # Maximum comments per request
             "depth": 10    # Maximum nesting depth
         }
@@ -223,7 +306,7 @@ class BaseRedditDataCollector:
             comments_count = len(response.get("data", []))
             logger.info(f"Fetched {comments_count} comments for post {post_id}")
             return response
-        except RedditAPIError as e:
+        except RedditAPIException as e:
             logger.error(f"Failed to fetch comments for post {post_id}: {e}")
             raise
     
@@ -281,7 +364,7 @@ class BaseRedditDataCollector:
                 
                 logger.info(f"Collected {len(all_posts)}/{total_limit} posts so far")
                 
-            except RedditAPIError as e:
+            except RedditAPIException as e:
                 logger.error(f"Pagination failed: {e}")
                 break
         
@@ -313,7 +396,7 @@ class BaseRedditDataCollector:
                 "authentication": "valid",
                 "timestamp": datetime.now().isoformat()
             }
-        except RedditAPIError as e:
+        except RedditAPIException as e:
             return {
                 "status": "unhealthy",
                 "api_accessible": False,
@@ -377,19 +460,21 @@ class SubredditDataCollector(BaseRedditDataCollector):
                     logger.info(f"Collecting comments for post {i+1}/{len(extracted_posts)}: {post_id}")
                     
                     # Fetch comment tree for this post
-                    comments_response = await self.fetch_comment_tree(post_id, sort="best")
+                    comments_response = await self.fetch_comment_tree(post_id)
                     total_api_calls += 1
                     
                     # Build PostWithComments object
+                    # First clean the comments response structure
+                    cleaned_comments = clean_posts_comments_response(comments_response)
                     post_with_comments = build_post_with_comments(
-                        post_data=post,
-                        comments_data=comments_response.get("data", [])
+                        clean_post=post,
+                        clean_comments=cleaned_comments
                     )
                     
                     if post_with_comments:
                         posts_with_comments.append(post_with_comments)
                         relevant_posts += 1
-                        logger.info(f"Successfully processed post {post_id} with {len(post_with_comments.comments)} comments")
+                        logger.info(f"Successfully processed post {post_id} with {len(post_with_comments['comments'])} comments")
                     else:
                         collection_errors.append(f"Post {post_id}: Failed to build PostWithComments")
                         
@@ -404,8 +489,8 @@ class SubredditDataCollector(BaseRedditDataCollector):
             
             metadata = {
                 "total_posts_analyzed": len(extracted_posts),
-                "total_comments_found": sum(len(p.comments) for p in posts_with_comments),
-                "relevant_comments_extracted": sum(len(p.comments) for p in posts_with_comments),
+                "total_comments_found": sum(len(p["comments"]) for p in posts_with_comments),
+                "relevant_comments_extracted": sum(len(p["comments"]) for p in posts_with_comments),
                 "irrelevant_posts": len(extracted_posts) - relevant_posts,
                 "analysis_timestamp": end_time,
                 "processing_time_seconds": processing_time,
@@ -424,7 +509,16 @@ class SubredditDataCollector(BaseRedditDataCollector):
             
         except Exception as e:
             logger.error(f"Subreddit collection failed: {e}")
-            raise RedditAPIError(f"Subreddit collection failed: {e}")
+            raise RedditAPIException(
+                message="Subreddit data collection pipeline failed",
+                endpoint="/subreddit/search",
+                debug_info={
+                    "subreddit": request.subreddit,
+                    "error_type": type(e).__name__,
+                    "error_message": str(e),
+                    "collection_phase": "main_pipeline"
+                }
+            )
 
 
 class SearchDataCollector(BaseRedditDataCollector):
@@ -482,19 +576,21 @@ class SearchDataCollector(BaseRedditDataCollector):
                     logger.info(f"Collecting comments for post {i+1}/{len(extracted_posts)}: {post_id}")
                     
                     # Fetch comment tree for this post
-                    comments_response = await self.fetch_comment_tree(post_id, sort="best")
+                    comments_response = await self.fetch_comment_tree(post_id)
                     total_api_calls += 1
                     
                     # Build PostWithComments object
+                    # First clean the comments response structure
+                    cleaned_comments = clean_posts_comments_response(comments_response)
                     post_with_comments = build_post_with_comments(
-                        post_data=post,
-                        comments_data=comments_response.get("data", [])
+                        clean_post=post,
+                        clean_comments=cleaned_comments
                     )
                     
                     if post_with_comments:
                         posts_with_comments.append(post_with_comments)
                         relevant_posts += 1
-                        logger.info(f"Successfully processed post {post_id} with {len(post_with_comments.comments)} comments")
+                        logger.info(f"Successfully processed post {post_id} with {len(post_with_comments['comments'])} comments")
                     else:
                         collection_errors.append(f"Post {post_id}: Failed to build PostWithComments")
                         
@@ -509,8 +605,8 @@ class SearchDataCollector(BaseRedditDataCollector):
             
             metadata = {
                 "total_posts_analyzed": len(extracted_posts),
-                "total_comments_found": sum(len(p.comments) for p in posts_with_comments),
-                "relevant_comments_extracted": sum(len(p.comments) for p in posts_with_comments),
+                "total_comments_found": sum(len(p["comments"]) for p in posts_with_comments),
+                "relevant_comments_extracted": sum(len(p["comments"]) for p in posts_with_comments),
                 "irrelevant_posts": len(extracted_posts) - relevant_posts,
                 "analysis_timestamp": end_time,
                 "processing_time_seconds": processing_time,
@@ -529,4 +625,13 @@ class SearchDataCollector(BaseRedditDataCollector):
             
         except Exception as e:
             logger.error(f"Search collection failed: {e}")
-            raise RedditAPIError(f"Search collection failed: {e}")
+            raise RedditAPIException(
+                message="Search data collection pipeline failed",
+                endpoint="/subreddit/search",
+                debug_info={
+                    "query": request.query,
+                    "error_type": type(e).__name__,
+                    "error_message": str(e),
+                    "collection_phase": "main_pipeline"
+                }
+            )

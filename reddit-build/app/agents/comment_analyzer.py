@@ -5,7 +5,7 @@ Provides sentiment analysis, theme extraction, and purchase intent detection for
 
 import asyncio
 import logging
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, Union
 from datetime import datetime
 from dataclasses import dataclass
 
@@ -17,7 +17,14 @@ from pydantic_ai.models.openai import OpenAIModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
 from app.core.config import get_settings
-from app.models.schemas import CommentAnalysis, PostWithComments
+from app.models.schemas import (
+    CommentAnalysis, 
+    PostWithComments, 
+    AnalysisMetadata, 
+    UnifiedAnalysisResponse,
+    SubredditAnalysisRequest,
+    SearchAnalysisRequest
+)
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +35,6 @@ class CommentInsight(BaseModel):
     sentiment: str = Field(description="Sentiment: 'positive', 'negative', or 'neutral'")
     theme: str = Field(description="Main theme or topic of the comment")
     purchase_intent: str = Field(description="Purchase intent: 'high', 'medium', 'low', or 'none'")
-    relevance_score: float = Field(description="Relevance to keywords (0.0-1.0)", ge=0.0, le=1.0)
     confidence: float = Field(description="Analysis confidence (0.0-1.0)", ge=0.0, le=1.0)
 
 
@@ -47,7 +53,6 @@ class PostAnalysisResult(BaseModel):
 @dataclass
 class AnalysisContext:
     """Context for comment analysis."""
-    keywords: List[str]
     system_prompt: str
     max_comments_per_post: int = 50
 
@@ -73,13 +78,12 @@ class CommentAnalyzerAgent:
         1. SENTIMENT: Determine if the comment is positive, negative, or neutral
         2. THEME: Identify the main topic or theme being discussed  
         3. PURCHASE INTENT: Assess likelihood of purchase intent (high/medium/low/none)
-        4. RELEVANCE: Score how relevant the comment is to the given keywords
         
         Guidelines:
         - Be objective and evidence-based in your analysis
         - Consider context and nuance in sentiment analysis
         - Purchase intent should reflect actual buying signals or interest
-        - Relevance should be based on keyword mentions and topical alignment
+        - Analyze ALL comments regardless of topic
         - Provide confidence scores reflecting certainty of your analysis
         """
         
@@ -149,14 +153,12 @@ class CommentAnalyzerAgent:
             
             Comment: "{comment_text}"
             
-            Keywords to consider: {', '.join(context.keywords)}
-            
             Provide structured analysis with confidence scores.
             """
             
             # Try primary agent first
             try:
-                result = await self.primary_agent.run_async(
+                result = await self.primary_agent.run(
                     analysis_prompt,
                     message_history=[]
                 )
@@ -164,7 +166,7 @@ class CommentAnalyzerAgent:
                 
             except Exception as e:
                 logger.warning(f"Primary agent failed, trying fallback: {e}")
-                result = await self.fallback_agent.run_async(
+                result = await self.fallback_agent.run(
                     analysis_prompt,
                     message_history=[]
                 )
@@ -188,7 +190,7 @@ class CommentAnalyzerAgent:
     
     async def analyze_post_comments(
         self,
-        post: PostWithComments,
+        post: Dict[str, Any],
         context: AnalysisContext
     ) -> PostAnalysisResult:
         """
@@ -206,9 +208,29 @@ class CommentAnalyzerAgent:
         error_messages = []
         
         # Limit comments processed per post
-        comments_to_process = post.comments[:context.max_comments_per_post]
+        max_comments = getattr(context, 'max_comments_per_post', 50)
+        logger.info(f"DEBUG: max_comments = {max_comments}, type = {type(max_comments)}")
+        logger.info(f"DEBUG: context = {context}")
+        comments_list = post.get("comments", [])
+        logger.info(f"DEBUG: comments_list type = {type(comments_list)}, length = {len(comments_list) if hasattr(comments_list, '__len__') else 'no length'}")
+        logger.info(f"DEBUG: comments_list = {comments_list}")
         
-        logger.info(f"Analyzing {len(comments_to_process)} comments for post {post.post_id}")
+        # Ensure max_comments is an integer
+        if not isinstance(max_comments, int):
+            logger.error(f"max_comments is not an integer: {max_comments}, type: {type(max_comments)}")
+            max_comments = 50
+            
+        # Ensure comments_list is actually a list
+        if not isinstance(comments_list, list):
+            logger.error(f"comments_list is not a list: {type(comments_list)}, value: {comments_list}")
+            comments_list = []
+            
+        comments_to_process = comments_list[:max_comments]
+        
+        post_id = post.get("post_id", "unknown")
+        logger.info(f"DEBUG: Full post structure = {post}")
+        logger.info(f"DEBUG: Post keys = {list(post.keys()) if isinstance(post, dict) else 'not a dict'}")
+        logger.info(f"Analyzing {len(comments_to_process)} comments for post {post_id}")
         
         # Process comments concurrently (but with rate limiting)
         semaphore = asyncio.Semaphore(5)  # Limit concurrent analyses
@@ -223,8 +245,8 @@ class CommentAnalyzerAgent:
                     return await self.analyze_comment(
                         comment_text=comment_text,
                         context=context,
-                        post_id=post.post_id,
-                        post_url=post.url
+                        post_id=post.get("post_id", "unknown"),
+                        post_url=post.get("url", "")
                     )
                 except Exception as e:
                     error_messages.append(f"Comment analysis error: {str(e)}")
@@ -244,8 +266,8 @@ class CommentAnalyzerAgent:
         processing_time = (datetime.now() - start_time).total_seconds()
         
         return PostAnalysisResult(
-            post_id=post.post_id,
-            post_url=post.url,
+            post_id=post.get("post_id", "unknown"),
+            post_url=post.get("url", ""),
             analyzed_comments=analyzed_comments,
             total_comments_processed=len(comments_to_process),
             relevant_comments_found=len(analyzed_comments),
@@ -255,7 +277,7 @@ class CommentAnalyzerAgent:
     
     async def analyze_multiple_posts(
         self,
-        posts: List[PostWithComments],
+        posts: List[Dict[str, Any]],
         context: AnalysisContext
     ) -> List[PostAnalysisResult]:
         """
@@ -273,7 +295,7 @@ class CommentAnalyzerAgent:
         # Process posts concurrently with rate limiting
         semaphore = asyncio.Semaphore(3)  # Limit concurrent post processing
         
-        async def analyze_single_post(post: PostWithComments) -> PostAnalysisResult:
+        async def analyze_single_post(post: Dict[str, Any]) -> PostAnalysisResult:
             async with semaphore:
                 return await self.analyze_post_comments(post, context)
         
@@ -289,8 +311,8 @@ class CommentAnalyzerAgent:
                 logger.error(f"Post analysis failed for post {i}: {result}")
                 # Create error result
                 error_result = PostAnalysisResult(
-                    post_id=posts[i].post_id if i < len(posts) else "unknown",
-                    post_url=posts[i].url if i < len(posts) else "unknown",
+                    post_id=posts[i].get("id", "unknown") if i < len(posts) else "unknown",
+                    post_url=posts[i].get("url", "") if i < len(posts) else "unknown",
                     analyzed_comments=[],
                     total_comments_processed=0,
                     relevant_comments_found=0,
@@ -303,8 +325,144 @@ class CommentAnalyzerAgent:
         return final_results
 
 
-# Singleton instance
+class ConcurrentCommentAnalysisOrchestrator:
+    """
+    High-level orchestrator for the complete Reddit comment analysis pipeline.
+    Coordinates data collection, AI analysis, and result aggregation.
+    """
+    
+    def __init__(self):
+        self.analyzer = CommentAnalyzerAgent()
+        self.settings = get_settings()
+        
+    async def run_full_analysis(
+        self,
+        posts: List[Dict[str, Any]],
+        analysis_request: Union[SubredditAnalysisRequest, SearchAnalysisRequest],
+        collection_metadata: Dict[str, Any] = None
+    ) -> UnifiedAnalysisResponse:
+        """
+        Execute the complete analysis pipeline from posts to final response.
+        
+        Args:
+            posts: List of posts with comments to analyze
+            analysis_request: Original request parameters
+            collection_metadata: Metadata from data collection phase
+            
+        Returns:
+            UnifiedAnalysisResponse with all analyses and metadata
+        """
+        start_time = datetime.now()
+        
+        logger.info(f"Starting full analysis pipeline for {len(posts)} posts")
+        
+        # Prepare analysis context
+        context = AnalysisContext(
+            system_prompt=analysis_request.system_prompt,
+            max_comments_per_post=50
+        )
+        
+        # Run AI analysis across all posts
+        analysis_results = await self.analyzer.analyze_multiple_posts(posts, context)
+        
+        # Calculate metadata
+        collection_method = "subreddit" if isinstance(analysis_request, SubredditAnalysisRequest) else "search"
+        processing_time = (datetime.now() - start_time).total_seconds()
+        
+        # Use ResultsStacker to build final response
+        stacker = ResultsStacker()
+        unified_response = stacker.stack_results(
+            analysis_results=analysis_results,
+            posts=posts,
+            processing_time=processing_time,
+            collection_metadata=collection_metadata or {},
+            model_used=analysis_request.model,
+            collection_method=collection_method
+        )
+        
+        logger.info(f"Analysis pipeline completed. Found {len(unified_response.comment_analyses)} relevant comments")
+        return unified_response
+
+
+class ResultsStacker:
+    """
+    Combines individual analysis results into a unified response.
+    Handles aggregation, metadata calculation, and response formatting.
+    """
+    
+    def stack_results(
+        self,
+        analysis_results: List[PostAnalysisResult],
+        posts: List[Dict[str, Any]],
+        processing_time: float,
+        collection_metadata: Dict[str, Any],
+        model_used: str,
+        collection_method: str
+    ) -> UnifiedAnalysisResponse:
+        """
+        Stack all analysis results into a unified response.
+        
+        Args:
+            analysis_results: Results from analyzing each post
+            posts: Original posts that were analyzed
+            processing_time: Total processing time in seconds
+            collection_metadata: Metadata from data collection
+            model_used: AI model used for analysis
+            collection_method: "subreddit" or "search"
+            
+        Returns:
+            UnifiedAnalysisResponse with aggregated results
+        """
+        # Aggregate all comment analyses
+        all_comment_analyses = []
+        total_comments_found = 0
+        total_api_calls = 0
+        total_errors = 0
+        
+        for result in analysis_results:
+            all_comment_analyses.extend(result.analyzed_comments)
+            total_comments_found += result.total_comments_processed
+            total_errors += len(result.error_messages)
+        
+        # Calculate posts with no relevant comments (irrelevant posts)
+        irrelevant_posts = sum(1 for result in analysis_results if len(result.analyzed_comments) == 0)
+        
+        # Count total comments across all posts
+        actual_total_comments = sum(len(post["comments"]) for post in posts)
+        
+        # Extract API calls from collection metadata
+        api_calls_made = (
+            collection_metadata.get("api_calls_made", 0) +  # Reddit API calls
+            len(all_comment_analyses)  # AI API calls (approximately)
+        )
+        
+        # Build metadata
+        metadata = AnalysisMetadata(
+            total_posts_analyzed=len(posts),
+            total_comments_found=actual_total_comments,
+            relevant_comments_extracted=len(all_comment_analyses),
+            irrelevant_posts=irrelevant_posts,
+            analysis_timestamp=datetime.now(),
+            processing_time_seconds=processing_time,
+            model_used=model_used,
+            api_calls_made=api_calls_made,
+            collection_method=collection_method,
+            cell_parsing_errors=collection_metadata.get("cell_parsing_errors", 0)
+        )
+        
+        # Create unified response
+        response = UnifiedAnalysisResponse(
+            comment_analyses=all_comment_analyses,
+            metadata=metadata
+        )
+        
+        logger.info(f"Results stacked: {len(all_comment_analyses)} comments from {len(posts)} posts")
+        return response
+
+
+# Singleton instances
 _comment_analyzer_agent = None
+_orchestrator = None
 
 def get_comment_analyzer() -> CommentAnalyzerAgent:
     """Get singleton instance of comment analyzer agent."""
@@ -312,3 +470,10 @@ def get_comment_analyzer() -> CommentAnalyzerAgent:
     if _comment_analyzer_agent is None:
         _comment_analyzer_agent = CommentAnalyzerAgent()
     return _comment_analyzer_agent
+
+def get_orchestrator() -> ConcurrentCommentAnalysisOrchestrator:
+    """Get singleton instance of analysis orchestrator."""
+    global _orchestrator
+    if _orchestrator is None:
+        _orchestrator = ConcurrentCommentAnalysisOrchestrator()
+    return _orchestrator
