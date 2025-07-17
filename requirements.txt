@@ -1,0 +1,26 @@
+# Production Dependencies
+fastapi[all]
+uvicorn[standard]
+pydantic[email]
+pydantic-settings
+python-dotenv
+python-multipart
+httpx
+asyncio
+
+# AI/LLM Dependencies
+pydantic-ai
+google-generativeai
+openai
+langchain-core
+langgraph
+pandas
+python-dateutil
+pytz
+
+# Development Dependencies
+pytest
+pytest-asyncio
+black
+flake8
+mypy 
