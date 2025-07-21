@@ -16,12 +16,22 @@ def setup_logging() -> None:
     # Convert string log level to logging constant
     log_level = getattr(logging, settings.log_level.upper(), logging.INFO)
 
-    # Configure basic logging
+    # Create handlers for both console and file output
+    console_handler = logging.StreamHandler(sys.stdout)
+    file_handler = logging.FileHandler("server.log", mode='a')
+    
+    # Set formatter for both handlers
+    formatter = logging.Formatter(
+        "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S"
+    )
+    console_handler.setFormatter(formatter)
+    file_handler.setFormatter(formatter)
+
+    # Configure basic logging with both handlers
     logging.basicConfig(
         level=log_level,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-        handlers=[logging.StreamHandler(sys.stdout)],
+        handlers=[console_handler, file_handler],
         force=True,  # Override any existing configuration
     )
 

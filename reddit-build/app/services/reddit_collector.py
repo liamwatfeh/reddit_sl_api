@@ -635,3 +635,4 @@ class SearchDataCollector(BaseRedditDataCollector):
                     "collection_phase": "main_pipeline"
                 }
             )
+ 

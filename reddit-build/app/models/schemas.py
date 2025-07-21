@@ -1,23 +1,65 @@
 """
 Core Pydantic models for Reddit comment analysis API.
+Enhanced with conversation context and thread analysis support.
 """
 
-from pydantic import BaseModel
-from typing import List, Dict, Any
+from pydantic import BaseModel, Field
+from typing import List, Dict, Any, Optional
 from datetime import datetime
 
 
 class CommentAnalysis(BaseModel):
-    """Model for individual comment analysis results."""
+    """Enhanced model for individual comment analysis with conversation context."""
 
+    # Core analysis fields
     post_id: str
-    post_url: str  # URL to original Reddit post for verification
-    quote: str
-    sentiment: str  # "positive", "negative", "neutral"
-    theme: str
-    purchase_intent: str  # "high", "medium", "low", "none"
+    post_url: str = Field(description="URL to original Reddit post for verification")
+    quote: str = Field(description="Comment text content", max_length=500)
+    sentiment: str = Field(description="Sentiment: positive, negative, neutral")
+    theme: str = Field(description="Main theme or topic discussed")
+    purchase_intent: str = Field(description="Purchase intent: high, medium, low, none")
     date: datetime
-    source: str = "reddit"
+    source: str = Field(default="reddit", description="Data source platform")
+    
+    # Enhanced context fields (optional for backward compatibility)
+    parent_comment_id: Optional[str] = Field(
+        default=None, 
+        description="ID of parent comment this responds to"
+    )
+    thread_depth: Optional[int] = Field(
+        default=None, 
+        description="Depth level in conversation thread (0=top-level)"
+    )
+    thread_position: Optional[int] = Field(
+        default=None,
+        description="Position within thread siblings"
+    )
+    children_count: Optional[int] = Field(
+        default=None,
+        description="Number of direct replies to this comment"
+    )
+    conversation_context: Optional[str] = Field(
+        default=None,
+        description="What this comment is responding to (parent context)",
+        max_length=200
+    )
+    thread_context: Optional[str] = Field(
+        default=None,
+        description="Summary of conversation flow leading to this comment",
+        max_length=300
+    )
+    confidence_score: Optional[float] = Field(
+        default=None,
+        description="AI analysis confidence (0.0-1.0)",
+        ge=0.0,
+        le=1.0
+    )
+    conversation_quality: Optional[float] = Field(
+        default=None,
+        description="Thread conversation quality score (0.0-1.0)",
+        ge=0.0,
+        le=1.0
+    )
 
     class Config:
         json_encoders = {datetime: lambda v: v.isoformat()}
@@ -91,8 +133,9 @@ class SearchAnalysisRequest(BaseModel):
 
 
 class AnalysisMetadata(BaseModel):
-    """Model for analysis metadata."""
+    """Enhanced model for analysis metadata with thread insights."""
 
+    # Core analysis metrics
     total_posts_analyzed: int
     total_comments_found: int
     relevant_comments_extracted: int
@@ -101,8 +144,40 @@ class AnalysisMetadata(BaseModel):
     processing_time_seconds: float
     model_used: str
     api_calls_made: int
-    collection_method: str  # "subreddit" or "search"
-    cell_parsing_errors: int = 0  # New field for cell parsing issues
+    collection_method: str = Field(description="subreddit or search")
+    cell_parsing_errors: int = Field(default=0, description="Cell parsing issues count")
+    
+    # Enhanced thread analysis metrics (optional)
+    max_thread_depth: Optional[int] = Field(
+        default=None,
+        description="Maximum conversation thread depth found"
+    )
+    total_threaded_comments: Optional[int] = Field(
+        default=None,
+        description="Total comments including all thread levels"
+    )
+    average_thread_depth: Optional[float] = Field(
+        default=None,
+        description="Average depth of comment threads"
+    )
+    conversation_threads_analyzed: Optional[int] = Field(
+        default=None,
+        description="Number of conversation threads processed"
+    )
+    thread_insights_generated: Optional[int] = Field(
+        default=None,
+        description="Number of conversation flow insights generated"
+    )
+    average_conversation_quality: Optional[float] = Field(
+        default=None,
+        description="Average conversation quality score (0.0-1.0)",
+        ge=0.0,
+        le=1.0
+    )
+    json_context_analysis_used: Optional[bool] = Field(
+        default=None,
+        description="Whether enhanced JSON context analysis was used"
+    )
 
     class Config:
         json_encoders = {datetime: lambda v: v.isoformat()}
@@ -113,3 +188,4 @@ class UnifiedAnalysisResponse(BaseModel):
 
     comment_analyses: List[CommentAnalysis]
     metadata: AnalysisMetadata
+ 

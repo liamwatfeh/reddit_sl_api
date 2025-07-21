@@ -7,9 +7,9 @@ import asyncio
 from datetime import datetime
 from typing import Dict, Any, List
 
-from ..core.logging import get_logger
-from ..core.config import get_settings
-from ..models.schemas import (
+from app.core.logging import get_logger
+from app.core.config import get_settings
+from app.models.schemas import (
     ConfigurableAnalysisRequest,
     UnifiedAnalysisResponse,
     CommentAnalysis,
@@ -18,8 +18,8 @@ from ..models.schemas import (
     AnalysisMetadata,
     PostWithComments,
 )
-from ..services.reddit_collector import SubredditDataCollector, SearchDataCollector
-from ..agents.comment_analyzer import get_orchestrator, AnalysisContext
+from app.services.reddit_collector import SubredditDataCollector, SearchDataCollector
+from app.agents.modern_comment_analyzer import ModernConcurrentCommentAnalysisOrchestrator
 
 # Initialize router, logger, and settings
 router = APIRouter()
@@ -199,7 +199,7 @@ async def analyze_subreddit(
 
         # Phase 2: AI Analysis & Response Building (via Orchestrator)
         logger.info("Starting AI analysis pipeline via orchestrator")
-        orchestrator = get_orchestrator()
+        orchestrator = ModernConcurrentCommentAnalysisOrchestrator(max_concurrent_agents=5)
         response = await orchestrator.run_full_analysis(
             posts=posts,
             analysis_request=request,
@@ -254,7 +254,7 @@ async def analyze_search(
 
         # Phase 2: AI Analysis & Response Building (via Orchestrator)
         logger.info("Starting AI analysis pipeline via orchestrator")
-        orchestrator = get_orchestrator()
+        orchestrator = ModernConcurrentCommentAnalysisOrchestrator(max_concurrent_agents=5)
         response = await orchestrator.run_full_analysis(
             posts=posts,
             analysis_request=request,
@@ -308,3 +308,4 @@ async def api_status() -> Dict[str, Any]:
             "openai_api": bool(settings.openai_api_key),
         },
     }
+ 

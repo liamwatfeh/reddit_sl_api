@@ -6,6 +6,8 @@ Works with both cell-based and flat object extraction formats.
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 import re
+import json
+import traceback
 
 
 def clean_reddit_post_updated(extracted_post: Dict[str, Any]) -> Dict[str, Any]:
@@ -41,7 +43,7 @@ def clean_posts_comments_response(api_response: Dict[str, Any]) -> List[Dict[str
         if not api_response or not isinstance(api_response, dict):
             print("API response is None or not a dict")
             return []
-        
+    
         # Extract data object with null safety
         data = api_response.get("data")
         if not data or not isinstance(data, dict):
@@ -84,14 +86,14 @@ def clean_posts_comments_response(api_response: Dict[str, Any]) -> List[Dict[str
                 if not comment_id or not isinstance(comment_id, str):
                     print(f"Tree {i} node missing valid ID, skipping")
                     continue
-                
+        
                 # Extract comment content with null safety
                 content_obj = node.get("content")
                 if content_obj and isinstance(content_obj, dict):
                     content = extract_comment_content(content_obj)
                 else:
                     content = ""
-                
+        
                 # Extract author name with null safety
                 author_info = node.get("authorInfo")
                 author_name = ""
@@ -99,12 +101,12 @@ def clean_posts_comments_response(api_response: Dict[str, Any]) -> List[Dict[str
                     author_name = author_info.get("name", "")
                     if not isinstance(author_name, str):
                         author_name = ""
-                
+        
                 # Handle deleted/removed comments
                 is_removed = node.get("isRemoved", False)
                 if is_removed or not content.strip():
                     content = "[deleted]"
-                
+        
                 # Convert creation date with null safety
                 created_at = node.get("createdAt")
                 comment_date = datetime.utcnow()
@@ -147,7 +149,7 @@ def clean_posts_comments_response(api_response: Dict[str, Any]) -> List[Dict[str
                 continue
         
         print(f"Successfully processed {processed_count} comments out of {len(trees)} trees")
-        
+    
         # Build nested structure by attaching children to parents
         roots = []
         for comment in comments.values():
@@ -156,14 +158,13 @@ def clean_posts_comments_response(api_response: Dict[str, Any]) -> List[Dict[str
                 comments[parent_id]["children"].append(comment)
             else:
                 roots.append(comment)
-        
+    
         print(f"Built comment tree with {len(roots)} root comments")
         return roots
         
     except Exception as e:
         # Log error and return empty list instead of None
         print(f"Error processing comments response: {e}")
-        import traceback
         traceback.print_exc()
         return []
 
