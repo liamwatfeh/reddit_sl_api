@@ -160,7 +160,7 @@ MANDATORY: You must return a structured response matching the required schema.
             
             # Call OpenAI with structured outputs
             response = await self.openai_client.beta.chat.completions.parse(
-                model="gpt-4o-mini",
+                model="gpt-4.1-2025-04-14",
                 messages=[
                     {"role": "system", "content": "You are an expert Reddit comment analyzer. Analyze posts and comments according to user criteria and return structured results."},
                     {"role": "user", "content": analysis_prompt}
@@ -313,7 +313,7 @@ MANDATORY: You must return a structured response matching the required schema.
                         irrelevant_posts=1,
                         analysis_timestamp=datetime.now(),
                         processing_time_seconds=processing_time,
-                        model_used="gpt-4o-mini",
+                        model_used="gpt-4.1-2025-04-14",
                         api_calls_made=0,
                         collection_method="modern",
                         max_thread_depth=0,
@@ -345,7 +345,7 @@ MANDATORY: You must return a structured response matching the required schema.
                     irrelevant_posts=0,
                     analysis_timestamp=datetime.now(),
                     processing_time_seconds=processing_time,
-                    model_used="gpt-4o-mini",
+                    model_used="gpt-4.1-2025-04-14",
                     api_calls_made=1,  # One OpenAI call per post
                     collection_method="modern",
                     max_thread_depth=self._calculate_max_depth(comments),
@@ -372,7 +372,7 @@ MANDATORY: You must return a structured response matching the required schema.
                     irrelevant_posts=1,
                     analysis_timestamp=datetime.now(),
                     processing_time_seconds=processing_time,
-                    model_used="gpt-4o-mini",
+                    model_used="gpt-4.1-2025-04-14",
                     api_calls_made=0,
                     collection_method="modern",
                     max_thread_depth=0,
@@ -439,7 +439,7 @@ MANDATORY: You must return a structured response matching the required schema.
                         irrelevant_posts=1,
                         analysis_timestamp=datetime.now(),
                         processing_time_seconds=0.0,
-                        model_used="gpt-4o-mini",
+                        model_used="gpt-4.1-2025-04-14",
                         api_calls_made=0,
                         collection_method="modern",
                         max_thread_depth=0,

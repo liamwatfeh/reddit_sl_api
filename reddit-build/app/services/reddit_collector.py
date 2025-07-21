@@ -257,12 +257,12 @@ class BaseRedditDataCollector:
         Returns:
             Raw Reddit API response with SubredditPost structure
         """
-        endpoint = "/posts/search"
+        endpoint = "/posts/search-posts"
         
         params = {
-            "q": query,
+            "query": query,
             "sort": sort,
-            "t": time,
+            "time": time,
             "limit": min(limit, 100),  # API limit
             "include_over_18": "true" if nsfw else "false"
         }
@@ -272,7 +272,28 @@ class BaseRedditDataCollector:
             
         try:
             response = await self._make_request(endpoint, params)
-            logger.info(f"Found {len(response.get('data', []))} search results for: {query}")
+            
+            # DEBUG: Log response structure for Step 2 validation
+            logger.info(f"=== STEP 2 DEBUG: Response structure ===")
+            logger.info(f"Response type: {type(response)}")
+            logger.info(f"Response keys: {list(response.keys()) if isinstance(response, dict) else 'Not a dict'}")
+            if isinstance(response, dict):
+                logger.info(f"'data' field type: {type(response.get('data'))}")
+                logger.info(f"'data' length: {len(response.get('data', [])) if response.get('data') is not None else 'None'}")
+                logger.info(f"'status' field: {response.get('status')}")
+                logger.info(f"'message' field: {response.get('message')}")
+                if response.get('data') and len(response.get('data', [])) > 0:
+                    first_post = response['data'][0]
+                    logger.info(f"First post keys: {list(first_post.keys()) if isinstance(first_post, dict) else 'Not a dict'}")
+                    logger.info(f"First post __typename: {first_post.get('__typename')}")
+            logger.info(f"=== END STEP 2 DEBUG ===")
+            
+            data_list = response.get('data', [])
+            if data_list is None:
+                logger.warning("Response 'data' field is None - treating as empty list")
+                data_list = []
+            
+            logger.info(f"Found {len(data_list)} search results for: {query}")
             return response
         except RedditAPIException as e:
             logger.error(f"Failed to search posts: {e}")

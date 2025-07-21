@@ -14,7 +14,7 @@ class CommentAnalysis(BaseModel):
     # Core analysis fields
     post_id: str
     post_url: str = Field(description="URL to original Reddit post for verification")
-    quote: str = Field(description="Comment text content", max_length=500)
+    quote: str = Field(description="Comment text content", max_length=1000)
     sentiment: str = Field(description="Sentiment: positive, negative, neutral")
     theme: str = Field(description="Main theme or topic discussed")
     purchase_intent: str = Field(description="Purchase intent: high, medium, low, none")
