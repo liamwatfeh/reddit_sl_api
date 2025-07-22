@@ -66,87 +66,109 @@ class CommentAnalysis(BaseModel):
 
 
 class PostWithComments(BaseModel):
-    """Post with all its comments after cleaning"""
+    """Model for Reddit post with its comments."""
 
-    post_id: str
-    post_title: str
-    post_content: str
-    post_author: str
-    post_score: int
-    post_date: datetime
-    subreddit: str
-    permalink: str
-    url: str
-    comments: List[Dict[str, Any]]
+    post_id: str = Field(description="Unique identifier for the post")
+    post_title: str = Field(description="Title of the Reddit post")
+    post_content: str = Field(description="Post content/description")
+    post_url: str = Field(description="URL to the original Reddit post")
+    post_date: datetime = Field(description="When the post was created")
+    subreddit: str = Field(description="Subreddit where the post is located")
+    comments: List[Dict[str, Any]] = Field(description="List of comments on the post")
 
 
-class ConfigurableAnalysisRequest(BaseModel):
-    """Model for configurable analysis request parameters."""
-
-    keywords: List[str] = ["BMW R 12 GS"]
-    subreddits: List[str] = ["motorcycles", "BMW"]
-    timeframe: str = "week"
-    limit: int = 10
-    model: str = "gpt-4.1-2025-04-14"
-    system_prompt: str = "You are an expert social media analyst..."
-    output_format: str = "json"
-    max_quote_length: int = 200
+class AnalysisContext(BaseModel):
+    """Context configuration for AI analysis."""
+    
+    system_prompt: str = Field(
+        default="Analyze the following Reddit comment for sentiment (positive/negative/neutral), main theme, and purchase intent (high/medium/low/none). Provide a concise analysis focusing on the user's opinion and any buying signals.",
+        description="System prompt for AI analysis"
+    )
+    max_comments_per_post: int = Field(
+        default=50, 
+        description="Maximum number of comments to analyze per post"
+    )
 
 
 class SubredditAnalysisRequest(BaseModel):
-    """Request schema for /analyze-subreddit endpoint"""
-    # Subreddit browsing parameters
-    subreddit: str  # e.g., "motorcycles", "BMW", "advrider"
-    sort: str = "hot"  # "hot", "new", "top", "controversial", "rising"
-    time: str = "week"  # "all", "year", "month", "week", "day", "hour"
-    limit: int = 50  # Number of posts to analyze
-    
-    # Model configuration
-    model: str = "gpt-4.1-2025-04-14"
-    
-    # Analysis configuration
-    system_prompt: str = """You are an expert social media analyst specializing in Reddit comment analysis. Your task is to analyze Reddit discussions to identify insightful comments, understand sentiment patterns, and extract meaningful themes from user conversations."""
-    
-    # Output configuration
-    output_format: str = "json"
-    max_quote_length: int = 200
+    """Request model for subreddit analysis."""
+
+    subreddit: str = Field(description="Target subreddit name (without r/)")
+    sort: str = Field(default="hot", description="Sort method: hot, new, top, rising")
+    time: str = Field(default="week", description="Time filter: hour, day, week, month, year")
+    limit: int = Field(default=25, description="Number of posts to collect", ge=1, le=100)
+    model: str = Field(
+        default="gpt-4.1-2025-04-14",
+        description="AI model to use for analysis"
+    )
+    system_prompt: str = Field(
+        default="Analyze the following Reddit comment for sentiment (positive/negative/neutral), main theme, and purchase intent (high/medium/low/none). Provide a concise analysis focusing on the user's opinion and any buying signals.",
+        description="Custom system prompt for AI analysis"
+    )
 
 
 class SearchAnalysisRequest(BaseModel):
-    """Request schema for /analyze-search endpoint"""
-    # Search parameters
-    query: str  # Search query, e.g., "BMW R 12 GS"
-    sort: str = "relevance"  # "relevance", "hot", "top", "new", "comments"
-    time: str = "week"  # "all", "year", "month", "week", "day", "hour"
-    limit: int = 50  # Number of posts to analyze
-    nsfw: bool = False  # Include NSFW content
-    
-    # Model configuration
-    model: str = "gpt-4.1-2025-04-14"
-    
-    # Analysis configuration
-    system_prompt: str = """You are an expert social media analyst specializing in Reddit comment analysis. Your task is to analyze Reddit discussions to identify insightful comments, understand sentiment patterns, and extract meaningful themes from user conversations."""
-    
-    # Output configuration
-    output_format: str = "json"
-    max_quote_length: int = 200
+    """Request model for search analysis."""
+
+    query: str = Field(description="Search query for Reddit posts")
+    sort: str = Field(default="relevance", description="Sort method: relevance, hot, top, new, comments")
+    time: str = Field(default="all", description="Time filter: hour, day, week, month, year, all")
+    limit: int = Field(default=25, description="Number of posts to collect", ge=1, le=100)
+    nsfw: bool = Field(default=False, description="Include NSFW content")
+    model: str = Field(
+        default="gpt-4.1-2025-04-14",
+        description="AI model to use for analysis"
+    )
+    system_prompt: str = Field(
+        default="Analyze the following Reddit comment for sentiment (positive/negative/neutral), main theme, and purchase intent (high/medium/low/none). Provide a concise analysis focusing on the user's opinion and any buying signals.",
+        description="Custom system prompt for AI analysis"
+    )
+
+
+class ConfigurableAnalysisRequest(BaseModel):
+    """Legacy model for configurable analysis requests."""
+
+    keywords: List[str] = Field(description="Keywords to search for")
+    subreddits: List[str] = Field(description="List of subreddits to search")
+    timeframe: str = Field(default="week", description="Time period: day, week, month")
+    limit: int = Field(default=25, description="Number of posts per subreddit", ge=1, le=100)
+    model: str = Field(
+        default="gpt-4.1-2025-04-14",
+        description="AI model for analysis"
+    )
+    system_prompt: str = Field(
+        default="Analyze the following Reddit comment for sentiment (positive/negative/neutral), main theme, and purchase intent (high/medium/low/none). Provide a concise analysis focusing on the user's opinion and any buying signals.",
+        description="System prompt for AI model"
+    )
 
 
 class AnalysisMetadata(BaseModel):
-    """Enhanced model for analysis metadata with thread insights."""
+    """Enhanced metadata for analysis results with conversation insights."""
 
-    # Core analysis metrics
-    total_posts_analyzed: int
-    total_comments_found: int
-    relevant_comments_extracted: int
-    irrelevant_posts: int
-    analysis_timestamp: datetime
-    processing_time_seconds: float
-    model_used: str
-    api_calls_made: int
-    collection_method: str = Field(description="subreddit or search")
-    cell_parsing_errors: int = Field(default=0, description="Cell parsing issues count")
+    total_posts_analyzed: int = Field(description="Number of posts processed")
+    total_comments_found: int = Field(description="Total comments discovered")
+    relevant_comments_extracted: int = Field(description="Comments selected for analysis")
+    irrelevant_posts: int = Field(description="Posts without relevant comments")
+    analysis_timestamp: datetime = Field(description="When analysis was completed")
+    processing_time_seconds: float = Field(description="Total processing time")
+    model_used: str = Field(description="AI model used for analysis")
+    api_calls_made: int = Field(description="Number of API calls executed")
+    collection_method: str = Field(description="Data collection method used")
     
+    # Error tracking
+    cell_parsing_errors: Optional[int] = Field(
+        default=None,
+        description="Number of cell parsing errors encountered"
+    )
+    data_extraction_errors: Optional[int] = Field(
+        default=None,
+        description="Number of data extraction errors"
+    )
+    ai_analysis_errors: Optional[int] = Field(
+        default=None,
+        description="Number of AI analysis errors"
+    )
+
     # Enhanced thread analysis metrics (optional)
     max_thread_depth: Optional[int] = Field(
         default=None,
@@ -188,4 +210,47 @@ class UnifiedAnalysisResponse(BaseModel):
 
     comment_analyses: List[CommentAnalysis]
     metadata: AnalysisMetadata
+
+
+# Background Job Models
+
+class JobSubmissionResponse(BaseModel):
+    """Response model for job submission."""
+    
+    job_id: str = Field(description="Unique identifier for the submitted job")
+    status: str = Field(description="Current job status")
+    message: str = Field(description="Human-readable status message")
+    estimated_completion_time: Optional[str] = Field(
+        default=None,
+        description="Estimated completion time (ISO format)"
+    )
+    status_url: str = Field(description="URL to check job status")
+    created_at: str = Field(description="Job creation timestamp (ISO format)")
+
+
+class JobStatusResponse(BaseModel):
+    """Response model for job status queries."""
+    
+    job_id: str = Field(description="Job identifier")
+    status: str = Field(description="Current job status: pending, running, completed, failed, cancelled")
+    created_at: str = Field(description="Job creation timestamp (ISO format)")
+    started_at: Optional[str] = Field(default=None, description="Job start timestamp (ISO format)")
+    completed_at: Optional[str] = Field(default=None, description="Job completion timestamp (ISO format)")
+    processing_time: Optional[float] = Field(default=None, description="Processing time in seconds")
+    progress: float = Field(description="Progress percentage (0-100)")
+    progress_message: str = Field(description="Current progress description")
+    result: Optional[UnifiedAnalysisResponse] = Field(default=None, description="Analysis results (if completed)")
+    error: Optional[str] = Field(default=None, description="Error message (if failed)")
+    error_details: Optional[Dict[str, Any]] = Field(default=None, description="Detailed error information")
+
+
+class JobQueueStatsResponse(BaseModel):
+    """Response model for job queue statistics."""
+    
+    total_jobs: int = Field(description="Total jobs in the system")
+    running_jobs: int = Field(description="Currently running jobs")
+    available_slots: int = Field(description="Available job execution slots")
+    max_concurrent_jobs: int = Field(description="Maximum concurrent jobs allowed")
+    status_breakdown: Dict[str, int] = Field(description="Count of jobs by status")
+    result_ttl_hours: float = Field(description="Hours that job results are retained")
  

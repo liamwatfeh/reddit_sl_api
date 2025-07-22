@@ -276,19 +276,30 @@ app.include_router(router)
 # Startup event
 @app.on_event("startup")
 async def startup_event() -> None:
-    """Log startup information."""
+    """Initialize application services and log startup information."""
     logger.info("🚀 Reddit Comment Analysis API starting up...")
     logger.info(f"📍 Version: {settings.app_version}")
     logger.info(f"🔧 Debug mode: {settings.debug}")
     logger.info(f"📊 Log level: {settings.log_level}")
     logger.info(f"🤖 Max concurrent agents: {settings.max_concurrent_agents}")
+    
+    # Initialize job queue
+    from app.services.job_queue import get_job_queue
+    job_queue = get_job_queue()
+    logger.info(f"📋 Background job queue initialized with {job_queue.max_concurrent_jobs} max concurrent jobs")
 
 
 # Shutdown event
 @app.on_event("shutdown")
 async def shutdown_event() -> None:
-    """Log shutdown information."""
+    """Gracefully shutdown application services."""
     logger.info("🛑 Reddit Comment Analysis API shutting down...")
+    
+    # Shutdown job queue
+    from app.services.job_queue import get_job_queue
+    job_queue = get_job_queue()
+    await job_queue.shutdown()
+    logger.info("📋 Background job queue shutdown completed")
 
 
 # Development mode startup check
