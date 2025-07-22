@@ -2,6 +2,7 @@
 Configuration management using Pydantic Settings.
 """
 
+from functools import lru_cache
 from typing import Optional
 from pydantic import Field
 from pydantic_settings import BaseSettings
@@ -10,19 +11,17 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
-    # API Keys
-    rapid_api_key: Optional[str] = Field(
-        default=None, description="RapidAPI key for Reddit access"
+    # API Keys - Critical keys are required, no defaults
+    rapid_api_key: str = Field(
+        description="RapidAPI key for Reddit access (REQUIRED)"
     )
-    gemini_api_key: Optional[str] = Field(
-        default=None, description="Google Gemini API key"
+    openai_api_key: str = Field(
+        description="OpenAI API key (REQUIRED)"
     )
-    openai_api_key: Optional[str] = Field(default=None, description="OpenAI API key")
     
-    # Internal API Security
+    # Internal API Security - No insecure default
     internal_api_key: str = Field(
-        default="dev-change-this-key", 
-        description="Shared API key for internal team access"
+        description="Shared API key for internal team access (REQUIRED)"
     )
 
     # Reddit API Configuration  
@@ -66,14 +65,8 @@ class Settings(BaseSettings):
         extra = "ignore"  # Ignore extra environment variables
 
 
-# Global settings instance
-_settings: Optional[Settings] = None
-
-
+@lru_cache(maxsize=1)
 def get_settings() -> Settings:
-    """Get the settings instance (singleton pattern)."""
-    global _settings
-    if _settings is None:
-        _settings = Settings()
-    return _settings
+    """Get the settings instance (singleton pattern with lru_cache)."""
+    return Settings()
  
