@@ -2,10 +2,12 @@
 FastAPI application for Reddit Comment Analysis API.
 """
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
 import time
+import uuid
 from datetime import datetime
 from typing import Callable, Any
 
@@ -36,14 +38,41 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
-# Add CORS middleware
+# Add Trusted Host middleware for security (Point 3)
+app.add_middleware(
+    TrustedHostMiddleware,
+    allowed_hosts=settings.allowed_hosts if not settings.debug else ["*"]
+)
+
+# Add CORS middleware with secure configuration (Point 1)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure appropriately for production
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=settings.allowed_origins if not settings.debug else ["*"],
+    allow_credentials=False,  # Only enable if absolutely necessary
+    allow_methods=settings.allowed_methods,
+    allow_headers=["Content-Type", "Authorization", "X-API-Key"],
 )
+
+
+# Request size limiting middleware (Point 3)
+@app.middleware("http")
+async def request_size_limit_middleware(request: Request, call_next: Callable[[Request], Any]) -> Any:
+    """Limit request body size to prevent DoS attacks."""
+    content_length = request.headers.get("content-length")
+    if content_length:
+        content_length = int(content_length)
+        if content_length > settings.max_request_size:
+            return JSONResponse(
+                status_code=413,
+                content={
+                    "error_code": "REQUEST_TOO_LARGE",
+                    "message": f"Request body too large. Maximum size is {settings.max_request_size / (1024*1024):.1f}MB",
+                    "request_id": f"req_{uuid.uuid4().hex[:12]}",
+                    "timestamp": datetime.now().isoformat(),
+                }
+            )
+    
+    return await call_next(request)
 
 
 # Request/response logging middleware
@@ -70,11 +99,11 @@ async def log_requests(request: Request, call_next: Callable[[Request], Any]) ->
     return response
 
 
-# Enhanced Exception Handlers
+# Enhanced Exception Handlers with UUID-based request IDs (Point 2)
 @app.exception_handler(BaseAPIException)
 async def api_exception_handler(request: Request, exc: BaseAPIException) -> JSONResponse:
     """Handle custom API exceptions with detailed logging."""
-    request_id = f"req_{int(time.time() * 1000)}"
+    request_id = f"req_{uuid.uuid4().hex[:12]}"
     
     logger.error(
         f"API Exception [{request_id}]: {exc.error_code} - {exc.detail['message']}",
@@ -108,7 +137,7 @@ async def api_exception_handler(request: Request, exc: BaseAPIException) -> JSON
 @app.exception_handler(RedditAPIException)
 async def reddit_api_exception_handler(request: Request, exc: RedditAPIException) -> JSONResponse:
     """Handle Reddit API specific exceptions."""
-    request_id = f"req_{int(time.time() * 1000)}"
+    request_id = f"req_{uuid.uuid4().hex[:12]}"
     
     logger.error(
         f"Reddit API Error [{request_id}]: {exc.error_code}",
@@ -136,7 +165,7 @@ async def reddit_api_exception_handler(request: Request, exc: RedditAPIException
 @app.exception_handler(AIAnalysisException)
 async def ai_analysis_exception_handler(request: Request, exc: AIAnalysisException) -> JSONResponse:
     """Handle AI analysis specific exceptions."""
-    request_id = f"req_{int(time.time() * 1000)}"
+    request_id = f"req_{uuid.uuid4().hex[:12]}"
     
     logger.error(
         f"AI Analysis Error [{request_id}]: {exc.error_code}",
@@ -162,7 +191,7 @@ async def ai_analysis_exception_handler(request: Request, exc: AIAnalysisExcepti
 @app.exception_handler(DataExtractionException)
 async def data_extraction_exception_handler(request: Request, exc: DataExtractionException) -> JSONResponse:
     """Handle data extraction specific exceptions."""
-    request_id = f"req_{int(time.time() * 1000)}"
+    request_id = f"req_{uuid.uuid4().hex[:12]}"
     
     logger.error(
         f"Data Extraction Error [{request_id}]: {exc.error_code}",
@@ -188,7 +217,7 @@ async def data_extraction_exception_handler(request: Request, exc: DataExtractio
 @app.exception_handler(RateLimitException)
 async def rate_limit_exception_handler(request: Request, exc: RateLimitException) -> JSONResponse:
     """Handle rate limiting exceptions."""
-    request_id = f"req_{int(time.time() * 1000)}"
+    request_id = f"req_{uuid.uuid4().hex[:12]}"
     
     logger.warning(
         f"Rate Limit Exceeded [{request_id}]: {exc.error_code}",
@@ -216,7 +245,7 @@ async def rate_limit_exception_handler(request: Request, exc: RateLimitException
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     """Handle unexpected exceptions globally with enhanced logging."""
-    request_id = f"req_{int(time.time() * 1000)}"
+    request_id = f"req_{uuid.uuid4().hex[:12]}"
     
     logger.error(
         f"Unhandled Exception [{request_id}]: {type(exc).__name__} - {str(exc)}",
@@ -270,8 +299,11 @@ if __name__ == "__main__":
     print("✅ Settings loaded successfully!")
     print("🔑 API Keys configured:")
     print(f"   - RapidAPI: {'✓' if settings.rapid_api_key else '✗'}")
-    print(f"   - Gemini: {'✓' if settings.gemini_api_key else '✗'}")
     print(f"   - OpenAI: {'✓' if settings.openai_api_key else '✗'}")
+    print("🔒 Security features enabled:")
+    print(f"   - CORS Origins: {settings.allowed_origins if not settings.debug else ['*']}")
+    print(f"   - Trusted Hosts: {settings.allowed_hosts if not settings.debug else ['*']}")
+    print(f"   - Max Request Size: {settings.max_request_size / (1024*1024):.1f}MB")
 
     uvicorn.run(
         "app.main:app",

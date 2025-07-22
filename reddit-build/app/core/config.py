@@ -3,7 +3,7 @@ Configuration management using Pydantic Settings.
 """
 
 from functools import lru_cache
-from typing import Optional
+from typing import Optional, List
 from pydantic import Field
 from pydantic_settings import BaseSettings
 
@@ -36,6 +36,26 @@ class Settings(BaseSettings):
     reddit_api_rate_limit_delay: float = Field(
         default=0.1, 
         description="Delay between Reddit API requests in seconds"
+    )
+
+    # CORS Configuration
+    allowed_origins: List[str] = Field(
+        default=["http://localhost:3000", "http://localhost:8000"], 
+        description="Allowed CORS origins"
+    )
+    allowed_methods: List[str] = Field(
+        default=["GET", "POST"], 
+        description="Allowed HTTP methods"
+    )
+    allowed_hosts: List[str] = Field(
+        default=["localhost", "127.0.0.1"], 
+        description="Allowed trusted hosts"
+    )
+
+    # Security Configuration
+    max_request_size: int = Field(
+        default=10 * 1024 * 1024,  # 10MB
+        description="Maximum request body size in bytes"
     )
 
     # Application Configuration
