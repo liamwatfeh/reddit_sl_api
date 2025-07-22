@@ -126,4 +126,19 @@ venv.bak/
 dmypy.json
 
 # Pyre type checker
-.pyre/ 
+.pyre/
+
+# Production specific ignores
+# IDE/Editor files
+.cursor/
+.vscode/
+.idea/
+
+# Application log files
+server.log
+server_debug.log
+*.log
+
+# Test artifacts
+test_request.json
+test_*.json 

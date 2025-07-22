@@ -2,13 +2,13 @@
 API routes for Reddit Comment Analysis API.
 """
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks
-import asyncio
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
 from datetime import datetime
 from typing import Dict, Any, List
 
 from app.core.logging import get_logger
 from app.core.config import get_settings
+from app.core.security import verify_internal_api_key
 from app.models.schemas import (
     ConfigurableAnalysisRequest,
     UnifiedAnalysisResponse,
@@ -42,7 +42,7 @@ async def health_check() -> Dict[str, Any]:
     }
 
 
-@router.post("/analyze-reddit-comments", response_model=UnifiedAnalysisResponse)
+@router.post("/analyze-reddit-comments", response_model=UnifiedAnalysisResponse, dependencies=[Depends(verify_internal_api_key)])
 async def analyze_reddit_comments(
     request: ConfigurableAnalysisRequest, background_tasks: BackgroundTasks
 ) -> UnifiedAnalysisResponse:
@@ -163,7 +163,7 @@ async def analyze_reddit_comments(
         )
 
 
-@router.post("/analyze-subreddit", response_model=UnifiedAnalysisResponse)
+@router.post("/analyze-subreddit", response_model=UnifiedAnalysisResponse, dependencies=[Depends(verify_internal_api_key)])
 async def analyze_subreddit(
     request: SubredditAnalysisRequest, background_tasks: BackgroundTasks
 ) -> UnifiedAnalysisResponse:
@@ -218,7 +218,7 @@ async def analyze_subreddit(
         )
 
 
-@router.post("/analyze-search", response_model=UnifiedAnalysisResponse)
+@router.post("/analyze-search", response_model=UnifiedAnalysisResponse, dependencies=[Depends(verify_internal_api_key)])
 async def analyze_search(
     request: SearchAnalysisRequest, background_tasks: BackgroundTasks
 ) -> UnifiedAnalysisResponse:
@@ -273,7 +273,7 @@ async def analyze_search(
         )
 
 
-@router.get("/status")
+@router.get("/status", dependencies=[Depends(verify_internal_api_key)])
 async def api_status() -> Dict[str, Any]:
     """
     Detailed API status endpoint with configuration information.

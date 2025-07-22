@@ -7,6 +7,10 @@ import re
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
+
 
 def extract_posts_from_reddit_response(api_response: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
@@ -69,7 +73,7 @@ def extract_post_from_cells(group_id: str, cells: List[Dict[str, Any]]) -> Optio
                     dt = datetime.fromisoformat(created_at.replace("+0000", "+00:00"))
                     post_data["created_utc"] = int(dt.timestamp())
                 except Exception as e:
-                    print(f"Error parsing date {created_at}: {e}")
+                    logger.error(f"Error parsing date {created_at}: {e}")
                     
         elif cell_type == "TitleCell":
             # Extract post title

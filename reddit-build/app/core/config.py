@@ -18,6 +18,12 @@ class Settings(BaseSettings):
         default=None, description="Google Gemini API key"
     )
     openai_api_key: Optional[str] = Field(default=None, description="OpenAI API key")
+    
+    # Internal API Security
+    internal_api_key: str = Field(
+        default="dev-change-this-key", 
+        description="Shared API key for internal team access"
+    )
 
     # Reddit API Configuration  
     rapidapi_reddit_host: str = Field(

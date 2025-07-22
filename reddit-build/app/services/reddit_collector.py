@@ -273,20 +273,9 @@ class BaseRedditDataCollector:
         try:
             response = await self._make_request(endpoint, params)
             
-            # DEBUG: Log response structure for Step 2 validation
-            logger.info(f"=== STEP 2 DEBUG: Response structure ===")
-            logger.info(f"Response type: {type(response)}")
-            logger.info(f"Response keys: {list(response.keys()) if isinstance(response, dict) else 'Not a dict'}")
-            if isinstance(response, dict):
-                logger.info(f"'data' field type: {type(response.get('data'))}")
-                logger.info(f"'data' length: {len(response.get('data', [])) if response.get('data') is not None else 'None'}")
-                logger.info(f"'status' field: {response.get('status')}")
-                logger.info(f"'message' field: {response.get('message')}")
-                if response.get('data') and len(response.get('data', [])) > 0:
-                    first_post = response['data'][0]
-                    logger.info(f"First post keys: {list(first_post.keys()) if isinstance(first_post, dict) else 'Not a dict'}")
-                    logger.info(f"First post __typename: {first_post.get('__typename')}")
-            logger.info(f"=== END STEP 2 DEBUG ===")
+            # Log essential response info (production-appropriate)
+            logger.info(f"Search response received: {len(response.get('data', [])) if isinstance(response, dict) and response.get('data') else 0} posts")
+            logger.debug(f"Response structure - Type: {type(response)}, Status: {response.get('status') if isinstance(response, dict) else 'unknown'}")
             
             data_list = response.get('data', [])
             if data_list is None:

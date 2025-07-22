@@ -9,6 +9,10 @@ import re
 import json
 import traceback
 
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
+
 
 def clean_reddit_post_updated(extracted_post: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -41,28 +45,28 @@ def clean_posts_comments_response(api_response: Dict[str, Any]) -> List[Dict[str
     try:
         # Handle None or empty api_response
         if not api_response or not isinstance(api_response, dict):
-            print("API response is None or not a dict")
+            logger.warning("API response is None or not a dict")
             return []
     
         # Extract data object with null safety
         data = api_response.get("data")
         if not data or not isinstance(data, dict):
-            print("API response data is None or not a dict")
+            logger.warning("API response data is None or not a dict")
             return []
             
         # Extract comment forest with null safety
         comment_forest = data.get("commentForest")
         if not comment_forest or not isinstance(comment_forest, dict):
-            print("Comment forest is None or not a dict")
+            logger.warning("Comment forest is None or not a dict")
             return []
         
         # Extract trees array with null safety
         trees = comment_forest.get("trees")
         if not trees or not isinstance(trees, list):
-            print("Trees is None or not a list")
+            logger.warning("Trees is None or not a list")
             return []
         
-        print(f"Processing {len(trees)} trees from comment forest")
+        logger.info(f"Processing {len(trees)} trees from comment forest")
         
         # Build a dict of all comments keyed by id
         comments = {}
@@ -72,19 +76,19 @@ def clean_posts_comments_response(api_response: Dict[str, Any]) -> List[Dict[str
             try:
                 # Validate tree object
                 if not tree or not isinstance(tree, dict):
-                    print(f"Tree {i} is None or not a dict, skipping")
+                    logger.warning(f"Tree {i} is None or not a dict, skipping")
                     continue
                 
                 # Skip "more comments" placeholders (they have node: null)
                 node = tree.get("node")
                 if not node or not isinstance(node, dict):
-                    print(f"Tree {i} has None or invalid node, skipping")
+                    logger.warning(f"Tree {i} has None or invalid node, skipping")
                     continue
                 
                 # Extract comment ID with null safety
                 comment_id = node.get("id")
                 if not comment_id or not isinstance(comment_id, str):
-                    print(f"Tree {i} node missing valid ID, skipping")
+                    logger.warning(f"Tree {i} node missing valid ID, skipping")
                     continue
         
                 # Extract comment content with null safety
@@ -114,7 +118,7 @@ def clean_posts_comments_response(api_response: Dict[str, Any]) -> List[Dict[str
                     try:
                         comment_date = datetime.fromisoformat(created_at.replace("+0000", "+00:00"))
                     except Exception as date_error:
-                        print(f"Date parsing error for comment {comment_id}: {date_error}")
+                        logger.warning(f"Date parsing error for comment {comment_id}: {date_error}")
                         pass
                 
                 # Extract score with null safety
@@ -145,10 +149,10 @@ def clean_posts_comments_response(api_response: Dict[str, Any]) -> List[Dict[str
                 processed_count += 1
                 
             except Exception as tree_error:
-                print(f"Error processing tree {i}: {tree_error}")
+                logger.error(f"Error processing tree {i}: {tree_error}")
                 continue
         
-        print(f"Successfully processed {processed_count} comments out of {len(trees)} trees")
+        logger.info(f"Successfully processed {processed_count} comments out of {len(trees)} trees")
     
         # Build nested structure by attaching children to parents
         roots = []
@@ -159,12 +163,12 @@ def clean_posts_comments_response(api_response: Dict[str, Any]) -> List[Dict[str
             else:
                 roots.append(comment)
     
-        print(f"Built comment tree with {len(roots)} root comments")
+        logger.info(f"Built comment tree with {len(roots)} root comments")
         return roots
         
     except Exception as e:
         # Log error and return empty list instead of None
-        print(f"Error processing comments response: {e}")
+        logger.error(f"Error processing comments response: {e}")
         traceback.print_exc()
         return []
 

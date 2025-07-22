@@ -6,6 +6,10 @@ Handles the simple SubredditPost structure from Reddit's search API.
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
+
 
 def extract_posts_from_search_response(api_response: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
@@ -54,7 +58,7 @@ def extract_search_post_data(post_item: Dict[str, Any]) -> Optional[Dict[str, An
             dt = datetime.fromisoformat(created_at.replace("+0000", "+00:00"))
             created_utc = int(dt.timestamp())
         except Exception as e:
-            print(f"Error parsing date {created_at}: {e}")
+            logger.error(f"Error parsing date {created_at}: {e}")
     
     post_data = {
         "id": post_id,
