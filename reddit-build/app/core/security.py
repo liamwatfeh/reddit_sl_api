@@ -2,6 +2,7 @@
 Simple shared API key authentication for internal use.
 """
 
+import secrets
 from fastapi import HTTPException, Header, status
 from app.core.config import get_settings
 from app.core.logging import get_logger
@@ -17,9 +18,6 @@ async def verify_internal_api_key(x_api_key: str = Header(..., description="Inte
     Args:
         x_api_key: API key from X-API-Key header
         
-    Returns:
-        True if valid
-        
     Raises:
         HTTPException: If API key is invalid
     """
@@ -31,13 +29,13 @@ async def verify_internal_api_key(x_api_key: str = Header(..., description="Inte
             headers={"WWW-Authenticate": "ApiKey"},
         )
     
-    if x_api_key != settings.internal_api_key:
-        logger.warning(f"Invalid API key attempted: {x_api_key[:10]}...")
+    # Use constant-time comparison to prevent timing attacks
+    if not secrets.compare_digest(x_api_key, settings.internal_api_key):
+        logger.warning("Invalid API key provided")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid API key. Contact your team admin for the correct key.",
             headers={"WWW-Authenticate": "ApiKey"},
         )
     
-    logger.info(f"Valid API key used: {x_api_key[:10]}...")
-    return True 
+    logger.info("Valid API key provided") 
