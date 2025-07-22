@@ -304,6 +304,12 @@ if __name__ == "__main__":
     print(f"   - CORS Origins: {settings.allowed_origins if not settings.debug else ['*']}")
     print(f"   - Trusted Hosts: {settings.allowed_hosts if not settings.debug else ['*']}")
     print(f"   - Max Request Size: {settings.max_request_size / (1024*1024):.1f}MB")
+    print("📝 Logging configuration:")
+    print(f"   - Level: {settings.log_level}")
+    print(f"   - File Logging: {'✓' if settings.enable_file_logging else '✗'}")
+    print(f"   - JSON Format: {'✓' if settings.enable_json_logging else '✗'}")
+    print(f"   - Log Path: {settings.log_file_path}/{settings.log_file_name}")
+    print(f"   - Rotation: {settings.log_rotation_size / (1024*1024):.1f}MB, {settings.log_retention_count} files")
 
     uvicorn.run(
         "app.main:app",

@@ -3,7 +3,7 @@ Configuration management using Pydantic Settings.
 """
 
 from functools import lru_cache
-from typing import Optional, List
+from typing import Optional, List, Dict
 from pydantic import Field
 from pydantic_settings import BaseSettings
 
@@ -58,8 +58,44 @@ class Settings(BaseSettings):
         description="Maximum request body size in bytes"
     )
 
+    # Logging Configuration
+    log_level: str = Field(default="INFO", description="Global logging level")
+    log_file_path: str = Field(
+        default="./logs", 
+        description="Directory path for log files"
+    )
+    log_file_name: str = Field(
+        default="reddit_api.log", 
+        description="Base name for log files"
+    )
+    enable_file_logging: bool = Field(
+        default=True, 
+        description="Enable logging to files"
+    )
+    enable_json_logging: bool = Field(
+        default=False, 
+        description="Use structured JSON logging format"
+    )
+    log_rotation_size: int = Field(
+        default=10 * 1024 * 1024,  # 10MB
+        description="Log file size before rotation (bytes)"
+    )
+    log_retention_count: int = Field(
+        default=5, 
+        description="Number of rotated log files to keep"
+    )
+    module_log_levels: Dict[str, str] = Field(
+        default={
+            "uvicorn.access": "WARNING",
+            "httpx": "WARNING", 
+            "httpcore": "WARNING",
+            "app.services.reddit_collector": "INFO",
+            "app.agents.modern_comment_analyzer": "INFO"
+        },
+        description="Module-specific log levels"
+    )
+
     # Application Configuration
-    log_level: str = Field(default="INFO", description="Logging level")
     max_concurrent_agents: int = Field(
         default=5, description="Maximum concurrent AI agents"
     )
