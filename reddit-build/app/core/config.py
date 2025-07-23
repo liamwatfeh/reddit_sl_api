@@ -96,9 +96,6 @@ class Settings(BaseSettings):
     )
 
     # Application Configuration
-    max_concurrent_agents: int = Field(
-        default=5, description="Maximum concurrent AI agents"
-    )
     debug: bool = Field(default=False, description="Enable debug mode")
 
     # AI Model Configuration
@@ -106,6 +103,31 @@ class Settings(BaseSettings):
         default="gpt-4.1-2025-04-14", 
         description="Primary AI model for comment analysis"
     )
+    openai_model: str = Field(default="gpt-4.1-2025-04-14", description="OpenAI model for analysis")
+    openai_temperature: float = Field(default=0.1, description="OpenAI model temperature for analysis")
+    openai_max_tokens: int = Field(default=4000, description="Maximum tokens for OpenAI responses")
+    
+    # Analysis Configuration
+    max_concurrent_agents: int = Field(default=5, description="Maximum concurrent AI analysis agents")
+    max_analysis_comments: int = Field(default=50, description="Maximum comments to analyze per post")
+    max_thread_depth: int = Field(default=10, description="Maximum thread depth to analyze")
+    
+    # Default Analysis Prompts and Settings
+    default_system_prompt: str = Field(
+        default="Analyze the following Reddit comment for sentiment (positive/negative/neutral), main theme, and purchase intent (high/medium/low/none). Provide a concise analysis focusing on the user's opinion and any buying signals.",
+        description="Default system prompt for AI analysis"
+    )
+    default_analysis_model: str = Field(
+        default="gpt-4.1-2025-04-14",
+        description="Default AI model for analysis requests"
+    )
+    
+    # Default Request Parameters
+    default_subreddit_sort: str = Field(default="hot", description="Default sort method for subreddit requests")
+    default_subreddit_time: str = Field(default="week", description="Default time filter for subreddit requests")
+    default_search_sort: str = Field(default="relevance", description="Default sort method for search requests")
+    default_search_time: str = Field(default="all", description="Default time filter for search requests")
+    default_request_limit: int = Field(default=25, description="Default number of posts to collect")
 
     # API Server Configuration
     host: str = Field(default="0.0.0.0", description="Server host")

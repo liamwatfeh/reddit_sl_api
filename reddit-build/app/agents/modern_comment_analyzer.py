@@ -11,6 +11,7 @@ from datetime import datetime
 from dataclasses import dataclass
 
 import openai
+from openai import APIError, RateLimitError, APITimeoutError
 from pydantic import BaseModel, Field
 
 from app.core.config import get_settings
@@ -63,11 +64,9 @@ class AnalysisContext:
     """Context for comment analysis with conversation threading support."""
     
     system_prompt: str
-    max_comments: int = 50
     preserve_threading: bool = True
     analyze_conversation_flow: bool = True
     include_thread_context: bool = True
-    max_thread_depth: int = 10
 
 
 class PostAnalysisResult(BaseModel):
@@ -94,9 +93,68 @@ class ModernCommentAnalyzer:
         # Initialize OpenAI client directly
         self.openai_client = openai.AsyncOpenAI(api_key=self.settings.openai_api_key)
         
+    def _extract_comment_date(self, comment_data: Dict[str, Any]) -> datetime:
+        """
+        Extract the actual comment creation timestamp from comment data.
+        
+        Args:
+            comment_data: Raw comment data structure
+            
+        Returns:
+            datetime object representing when comment was created
+        """
+        try:
+            # Try to find timestamp in various possible fields
+            timestamp_fields = ['created_utc', 'created', 'timestamp', 'date']
+            
+            for field in timestamp_fields:
+                if field in comment_data and comment_data[field]:
+                    timestamp = comment_data[field]
+                    # Handle Unix timestamp (common in Reddit data)
+                    if isinstance(timestamp, (int, float)):
+                        return datetime.fromtimestamp(timestamp)
+                    # Handle ISO string
+                    elif isinstance(timestamp, str):
+                        try:
+                            return datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                        except ValueError:
+                            continue
+            
+            # Fallback to current time with warning
+            logger.warning(f"Could not extract comment timestamp from fields: {list(comment_data.keys())}")
+            return datetime.now()
+            
+        except Exception as e:
+            logger.error(f"Error extracting comment date: {e}")
+            return datetime.now()
+    
+    def _truncate_comments_for_analysis(
+        self, 
+        comments: List[Dict[str, Any]], 
+        max_comments: int
+    ) -> List[Dict[str, Any]]:
+        """
+        Truncate comment list to stay within max_comments limit while preserving structure.
+        
+        Args:
+            comments: List of comment dictionaries
+            max_comments: Maximum number of comments to include
+            
+        Returns:
+            Truncated list of comments
+        """
+        if len(comments) <= max_comments:
+            return comments
+        
+        logger.info(f"Truncating {len(comments)} comments to {max_comments} for analysis")
+        
+        # Simple truncation - take first N comments
+        # TODO: Could be enhanced with smarter selection (e.g., highest scoring comments)
+        return comments[:max_comments]
+        
     async def analyze_full_post_context(
         self, 
-        post_with_comments: Dict[str, Any], 
+        post_with_comments: PostWithComments, 
         context: AnalysisContext
     ) -> Tuple[List[CommentAnalysis], List[str], float]:
         """
@@ -112,18 +170,26 @@ class ModernCommentAnalyzer:
         try:
             logger.info("Starting modern JSON context analysis")
             
+            # Convert PostWithComments to dict for processing
+            post_dict = post_with_comments.model_dump() if hasattr(post_with_comments, 'model_dump') else post_with_comments.dict()
+            
             # Validate post structure
-            if not self._validate_post_structure(post_with_comments):
+            if not self._validate_post_structure(post_dict):
                 logger.warning("Invalid post structure, skipping analysis")
                 return [], [], 0.0
             
-            post_id = post_with_comments.get("id", "unknown")
-            post_title = post_with_comments.get("title", "No title")
-            comments_list = post_with_comments.get("comments", [])
+            post_id = post_dict.get("id", "unknown")
+            post_title = post_dict.get("title", "No title")
+            comments_list = post_dict.get("comments", [])
+            
+            # Apply max_comments limit from settings
+            max_comments = self.settings.max_analysis_comments
+            if len(comments_list) > max_comments:
+                comments_list = self._truncate_comments_for_analysis(comments_list, max_comments)
             
             logger.info(f"Analyzing post: {post_id}")
             logger.info(f"Post title: {post_title}")
-            logger.info(f"Total comments in structure: {len(comments_list)}")
+            logger.info(f"Comments for analysis: {len(comments_list)}")
             
             total_threaded_comments = self._count_threaded_comments(comments_list)
             max_depth = self._calculate_max_depth(comments_list)
@@ -138,7 +204,7 @@ Analyze this Reddit post and its comments based on the following criteria:
 FILTERING CRITERIA: {context.system_prompt}
 
 POST DATA:
-{json.dumps(post_with_comments, indent=2, cls=DateTimeEncoder)}
+{json.dumps(post_dict, indent=2, cls=DateTimeEncoder)}
 
 ANALYSIS INSTRUCTIONS:
 1. Read the post title and content to understand the discussion topic
@@ -158,16 +224,16 @@ MANDATORY: You must return a structured response matching the required schema.
 
             logger.info(f"Calling OpenAI with structured output schema")
             
-            # Call OpenAI with structured outputs
+            # Call OpenAI with structured outputs using externalized configuration
             response = await self.openai_client.beta.chat.completions.parse(
-                model="gpt-4.1-2025-04-14",
+                model=self.settings.openai_model,
                 messages=[
                     {"role": "system", "content": "You are an expert Reddit comment analyzer. Analyze posts and comments according to user criteria and return structured results."},
                     {"role": "user", "content": analysis_prompt}
                 ],
                 response_format=ContextualAnalysisSchema,
-                temperature=0.1,
-                max_tokens=4000
+                temperature=self.settings.openai_temperature,
+                max_tokens=self.settings.openai_max_tokens
             )
             
             # Extract the structured result
@@ -183,12 +249,21 @@ MANDATORY: You must return a structured response matching the required schema.
                 logger.info(f"First comment from OpenAI: {analysis_result.relevant_comments[0].dict()}")
             
             # Convert to our internal format
-            comment_analyses = self._convert_to_comment_analysis(analysis_result, post_with_comments)
+            comment_analyses = self._convert_to_comment_analysis(analysis_result, post_dict)
             
             logger.info(f"Converted {len(comment_analyses)} comments to CommentAnalysis format")
             
             return comment_analyses, analysis_result.thread_insights, analysis_result.conversation_quality
             
+        except RateLimitError as e:
+            logger.error(f"OpenAI rate limit exceeded: {e}")
+            return [], [], 0.0
+        except APITimeoutError as e:
+            logger.error(f"OpenAI API timeout: {e}")
+            return [], [], 0.0
+        except APIError as e:
+            logger.error(f"OpenAI API error: {e}")
+            return [], [], 0.0
         except Exception as e:
             logger.error(f"Modern analysis failed: {type(e).__name__}: {e}")
             import traceback
@@ -222,6 +297,31 @@ MANDATORY: You must return a structured response matching the required schema.
             max_depth = max(max_depth, current_depth)
         return max_depth
     
+    def _find_comment_in_structure(
+        self, 
+        comments: List[Dict[str, Any]], 
+        comment_text: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Find a comment in the nested structure by matching text.
+        
+        Args:
+            comments: List of comment dictionaries (nested structure)
+            comment_text: Text to match against
+            
+        Returns:
+            Comment dictionary if found, None otherwise
+        """
+        for comment in comments:
+            if comment.get("text", "") == comment_text or comment.get("body", "") == comment_text:
+                return comment
+            # Recursively search in children
+            if comment.get("children"):
+                found = self._find_comment_in_structure(comment["children"], comment_text)
+                if found:
+                    return found
+        return None
+    
     def _convert_to_comment_analysis(
         self, 
         analysis_result: ContextualAnalysisSchema, 
@@ -233,15 +333,20 @@ MANDATORY: You must return a structured response matching the required schema.
         # Extract post info for required fields
         post_id = post_with_comments.get("id", "unknown")
         post_url = f"https://reddit.com/r/{post_with_comments.get('subreddit', 'unknown')}/comments/{post_id}/"
+        comments_structure = post_with_comments.get("comments", [])
         
         for comment_schema in analysis_result.relevant_comments:
             try:
+                # Try to find the original comment data to get actual timestamp
+                original_comment = self._find_comment_in_structure(comments_structure, comment_schema.text)
+                comment_date = self._extract_comment_date(original_comment) if original_comment else datetime.now()
+                
                 comment_analysis = CommentAnalysis(
                     # Required fields
                     post_id=post_id,
                     post_url=post_url,
                     quote=comment_schema.text,  # Map 'text' to 'quote'
-                    date=datetime.now(),  # Use current time since comment date not available
+                    date=comment_date,  # Use actual comment timestamp
                     
                     # Core analysis fields
                     sentiment=comment_schema.sentiment,
@@ -270,7 +375,7 @@ MANDATORY: You must return a structured response matching the required schema.
 
     async def analyze_post_comments(
         self, 
-        post: Dict[str, Any], 
+        post: PostWithComments, 
         context: AnalysisContext
     ) -> PostAnalysisResult:
         """
@@ -286,11 +391,14 @@ MANDATORY: You must return a structured response matching the required schema.
         start_time = datetime.now()
         
         try:
-            post_id = post.get("id", "unknown")
-            logger.info(f"Starting modern analysis for post: {post_id}")
-            logger.info(f"Post title: {post.get('title', 'No title')}")
+            # Convert to dict for processing
+            post_dict = post.model_dump() if hasattr(post, 'model_dump') else post.dict()
+            post_id = post_dict.get("id", "unknown")
             
-            comments = post.get("comments", [])
+            logger.info(f"Starting modern analysis for post: {post_id}")
+            logger.info(f"Post title: {post_dict.get('title', 'No title')}")
+            
+            comments = post_dict.get("comments", [])
             total_comments = self._count_threaded_comments(comments)
             logger.info(f"Total comments to analyze: {total_comments}")
             
@@ -313,7 +421,7 @@ MANDATORY: You must return a structured response matching the required schema.
                         irrelevant_posts=1,
                         analysis_timestamp=datetime.now(),
                         processing_time_seconds=processing_time,
-                        model_used="gpt-4.1-2025-04-14",
+                        model_used=self.settings.openai_model,
                         api_calls_made=0,
                         collection_method="modern",
                         max_thread_depth=0,
@@ -345,7 +453,7 @@ MANDATORY: You must return a structured response matching the required schema.
                     irrelevant_posts=0,
                     analysis_timestamp=datetime.now(),
                     processing_time_seconds=processing_time,
-                    model_used="gpt-4.1-2025-04-14",
+                    model_used=self.settings.openai_model,
                     api_calls_made=1,  # One OpenAI call per post
                     collection_method="modern",
                     max_thread_depth=self._calculate_max_depth(comments),
@@ -354,11 +462,11 @@ MANDATORY: You must return a structured response matching the required schema.
             )
             
         except Exception as e:
-            logger.error(f"Error analyzing post {post.get('id', 'unknown')}: {e}")
+            logger.error(f"Error analyzing post {getattr(post, 'id', 'unknown')}: {e}")
             processing_time = (datetime.now() - start_time).total_seconds()
             
             return PostAnalysisResult(
-                post_id=post.get("id", "unknown"),
+                post_id=getattr(post, "id", "unknown"),
                 comment_analyses=[],
                 thread_insights=[],
                 total_comments_found=0,
@@ -372,7 +480,7 @@ MANDATORY: You must return a structured response matching the required schema.
                     irrelevant_posts=1,
                     analysis_timestamp=datetime.now(),
                     processing_time_seconds=processing_time,
-                    model_used="gpt-4.1-2025-04-14",
+                    model_used=self.settings.openai_model,
                     api_calls_made=0,
                     collection_method="modern",
                     max_thread_depth=0,
@@ -382,9 +490,9 @@ MANDATORY: You must return a structured response matching the required schema.
 
     async def analyze_multiple_posts(
         self, 
-        posts: List[Dict[str, Any]], 
+        posts: List[PostWithComments], 
         context: AnalysisContext,
-        max_concurrent: int = 3
+        max_concurrent: Optional[int] = None
     ) -> UnifiedAnalysisResponse:
         """
         Analyze multiple posts concurrently using modern approach.
@@ -392,12 +500,15 @@ MANDATORY: You must return a structured response matching the required schema.
         Args:
             posts: List of posts with comments
             context: Analysis context
-            max_concurrent: Maximum concurrent analyses
+            max_concurrent: Maximum concurrent analyses (uses settings if None)
             
         Returns:
             UnifiedAnalysisResponse with aggregated results
         """
         start_time = datetime.now()
+        
+        if max_concurrent is None:
+            max_concurrent = self.settings.max_concurrent_agents
         
         logger.info(f"Starting modern analysis of {len(posts)} posts with max_concurrent={max_concurrent}")
         
@@ -424,8 +535,9 @@ MANDATORY: You must return a structured response matching the required schema.
             if isinstance(result, Exception):
                 logger.error(f"Analysis failed for post {i}: {result}")
                 # Create error result
+                post_dict = posts[i].model_dump() if hasattr(posts[i], 'model_dump') else posts[i].dict()
                 error_result = PostAnalysisResult(
-                    post_id=posts[i].get("id", "unknown"),
+                    post_id=post_dict.get("id", "unknown"),
                     comment_analyses=[],
                     thread_insights=[],
                     total_comments_found=0,
@@ -439,7 +551,7 @@ MANDATORY: You must return a structured response matching the required schema.
                         irrelevant_posts=1,
                         analysis_timestamp=datetime.now(),
                         processing_time_seconds=0.0,
-                        model_used="gpt-4.1-2025-04-14",
+                        model_used=self.settings.openai_model,
                         api_calls_made=0,
                         collection_method="modern",
                         max_thread_depth=0,
@@ -477,7 +589,7 @@ MANDATORY: You must return a structured response matching the required schema.
                 irrelevant_posts=len(posts) - total_posts_analyzed,
                 analysis_timestamp=datetime.now(),
                 processing_time_seconds=processing_time,
-                model_used="gpt-4o-mini",
+                model_used=self.settings.openai_model,
                 api_calls_made=api_calls_made,
                 collection_method="modern",
                 max_thread_depth=max_thread_depth,
@@ -492,13 +604,14 @@ class ModernConcurrentCommentAnalysisOrchestrator:
     Replaces the problematic Pydantic AI orchestrator.
     """
     
-    def __init__(self, max_concurrent_agents: int = 5):
-        self.max_concurrent_agents = max_concurrent_agents
+    def __init__(self, max_concurrent_agents: Optional[int] = None):
+        self.settings = get_settings()
+        self.max_concurrent_agents = max_concurrent_agents or self.settings.max_concurrent_agents
         self.analyzer = ModernCommentAnalyzer()
         
     async def analyze_posts(
         self, 
-        posts: List[Dict[str, Any]], 
+        posts: List[PostWithComments], 
         analysis_request: Union[SubredditAnalysisRequest, SearchAnalysisRequest]
     ) -> UnifiedAnalysisResponse:
         """
@@ -513,14 +626,12 @@ class ModernConcurrentCommentAnalysisOrchestrator:
         """
         logger.info(f"Modern orchestrator starting analysis of {len(posts)} posts")
         
-        # Create analysis context
+        # Create analysis context using settings for configuration
         context = AnalysisContext(
             system_prompt=analysis_request.system_prompt,
-            max_comments=50,  # Reasonable default
             preserve_threading=True,
             analyze_conversation_flow=True,
-            include_thread_context=True,
-            max_thread_depth=10
+            include_thread_context=True
         )
         
         # Use the modern analyzer
@@ -532,7 +643,7 @@ class ModernConcurrentCommentAnalysisOrchestrator:
     
     async def run_full_analysis(
         self,
-        posts: List[Dict[str, Any]],
+        posts: List[PostWithComments],
         analysis_request: Union[SubredditAnalysisRequest, SearchAnalysisRequest],
         collection_metadata: Dict[str, Any] = None
     ) -> UnifiedAnalysisResponse:

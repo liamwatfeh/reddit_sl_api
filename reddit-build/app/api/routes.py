@@ -10,6 +10,13 @@ from typing import Dict, Any, List
 from app.core.logging import get_logger
 from app.core.config import get_settings
 from app.core.security import verify_internal_api_key
+from app.core.exceptions import (
+    RedditAPIException,
+    DataExtractionException,
+    AIAnalysisException,
+    ValidationException,
+    ConfigurationException,
+)
 from app.models.schemas import (
     ConfigurableAnalysisRequest,
     UnifiedAnalysisResponse,
@@ -59,41 +66,42 @@ async def _background_subreddit_analysis(job_id: str, request: SubredditAnalysis
         
     Returns:
         UnifiedAnalysisResponse: Analysis results
+        
+    Raises:
+        RedditAPIException: When Reddit API is unavailable or returns errors
+        AIAnalysisException: When AI analysis fails
+        DataExtractionException: When data extraction/parsing fails
     """
     logger.info(f"[{job_id}] Starting subreddit analysis: r/{request.subreddit}")
     
-    try:
-        # Phase 1: Data Collection (20% progress)
-        await update_job_progress(job_id, 20.0, f"Collecting posts from r/{request.subreddit}")
+    # Phase 1: Data Collection (20% progress)
+    await update_job_progress(job_id, 20.0, f"Collecting posts from r/{request.subreddit}")
+    
+    async with SubredditDataCollector() as collector:
+        posts, collection_metadata = await collector.collect_subreddit_posts(request)
         
-        async with SubredditDataCollector() as collector:
-            posts, collection_metadata = await collector.collect_subreddit_posts(request)
-            
-            logger.info(f"[{job_id}] Collected {len(posts)} posts from r/{request.subreddit}")
-            logger.info(f"[{job_id}] Total comments found: {sum(len(post['comments']) for post in posts)}")
+        logger.info(f"[{job_id}] Collected {len(posts)} posts from r/{request.subreddit}")
+        logger.info(f"[{job_id}] Total comments found: {sum(len(post['comments']) for post in posts)}")
 
-        # Phase 2: AI Analysis (20% -> 90% progress)
-        await update_job_progress(job_id, 40.0, "Starting AI analysis pipeline")
-        
-        orchestrator = ModernConcurrentCommentAnalysisOrchestrator(max_concurrent_agents=settings.max_concurrent_agents)
-        response = await orchestrator.run_full_analysis(
-            posts=posts,
-            analysis_request=request,
-            collection_metadata=collection_metadata
-        )
+    # Phase 2: AI Analysis (20% -> 90% progress)
+    await update_job_progress(job_id, 40.0, "Starting AI analysis pipeline")
+    
+    # Use externalized concurrency configuration (Point 3)
+    orchestrator = ModernConcurrentCommentAnalysisOrchestrator(max_concurrent_agents=settings.max_concurrent_agents)
+    response = await orchestrator.run_full_analysis(
+        posts=posts,
+        analysis_request=request,
+        collection_metadata=collection_metadata
+    )
 
-        # Final progress update
-        await update_job_progress(job_id, 95.0, "Finalizing results")
-        
-        logger.info(
-            f"[{job_id}] Subreddit analysis completed: {len(response.comment_analyses)} relevant comments from {response.metadata.total_posts_analyzed} posts"
-        )
-        
-        return response
-
-    except Exception as e:
-        logger.error(f"[{job_id}] Error in subreddit analysis: {str(e)}", exc_info=True)
-        raise
+    # Final progress update
+    await update_job_progress(job_id, 95.0, "Finalizing results")
+    
+    logger.info(
+        f"[{job_id}] Subreddit analysis completed: {len(response.comment_analyses)} relevant comments from {response.metadata.total_posts_analyzed} posts"
+    )
+    
+    return response
 
 
 async def _background_search_analysis(job_id: str, request: SearchAnalysisRequest) -> UnifiedAnalysisResponse:
@@ -106,41 +114,42 @@ async def _background_search_analysis(job_id: str, request: SearchAnalysisReques
         
     Returns:
         UnifiedAnalysisResponse: Analysis results
+        
+    Raises:
+        RedditAPIException: When Reddit API is unavailable or returns errors
+        AIAnalysisException: When AI analysis fails
+        DataExtractionException: When data extraction/parsing fails
     """
     logger.info(f"[{job_id}] Starting search analysis: {request.query}")
     
-    try:
-        # Phase 1: Data Collection (20% progress)
-        await update_job_progress(job_id, 20.0, f"Searching Reddit for: {request.query}")
+    # Phase 1: Data Collection (20% progress)
+    await update_job_progress(job_id, 20.0, f"Searching Reddit for: {request.query}")
+    
+    async with SearchDataCollector() as collector:
+        posts, collection_metadata = await collector.collect_search_posts(request)
         
-        async with SearchDataCollector() as collector:
-            posts, collection_metadata = await collector.collect_search_posts(request)
-            
-            logger.info(f"[{job_id}] Found {len(posts)} posts for query: {request.query}")
-            logger.info(f"[{job_id}] Total comments found: {sum(len(post['comments']) for post in posts)}")
+        logger.info(f"[{job_id}] Found {len(posts)} posts for query: {request.query}")
+        logger.info(f"[{job_id}] Total comments found: {sum(len(post['comments']) for post in posts)}")
 
-        # Phase 2: AI Analysis (20% -> 90% progress)
-        await update_job_progress(job_id, 40.0, "Starting AI analysis pipeline")
-        
-        orchestrator = ModernConcurrentCommentAnalysisOrchestrator(max_concurrent_agents=settings.max_concurrent_agents)
-        response = await orchestrator.run_full_analysis(
-            posts=posts,
-            analysis_request=request,
-            collection_metadata=collection_metadata
-        )
+    # Phase 2: AI Analysis (20% -> 90% progress)
+    await update_job_progress(job_id, 40.0, "Starting AI analysis pipeline")
+    
+    # Use externalized concurrency configuration (Point 3)
+    orchestrator = ModernConcurrentCommentAnalysisOrchestrator(max_concurrent_agents=settings.max_concurrent_agents)
+    response = await orchestrator.run_full_analysis(
+        posts=posts,
+        analysis_request=request,
+        collection_metadata=collection_metadata
+    )
 
-        # Final progress update
-        await update_job_progress(job_id, 95.0, "Finalizing results")
-        
-        logger.info(
-            f"[{job_id}] Search analysis completed: {len(response.comment_analyses)} relevant comments from {response.metadata.total_posts_analyzed} posts"
-        )
-        
-        return response
-
-    except Exception as e:
-        logger.error(f"[{job_id}] Error in search analysis: {str(e)}", exc_info=True)
-        raise
+    # Final progress update
+    await update_job_progress(job_id, 95.0, "Finalizing results")
+    
+    logger.info(
+        f"[{job_id}] Search analysis completed: {len(response.comment_analyses)} relevant comments from {response.metadata.total_posts_analyzed} posts"
+    )
+    
+    return response
 
 
 # New Async Endpoints
@@ -162,8 +171,19 @@ async def analyze_subreddit_async(
 
     Returns:
         JobSubmissionResponse: Job submission details with tracking information
+        
+    Raises:
+        ValidationException: When request parameters are invalid
+        ConfigurationException: When system configuration is invalid
     """
     logger.info(f"Subreddit analysis job submitted: r/{request.subreddit}")
+
+    # Validate subreddit name
+    if not request.subreddit or not request.subreddit.strip():
+        raise ValidationException(
+            "Subreddit name cannot be empty",
+            field="subreddit"
+        )
 
     job_queue = get_job_queue()
     job_id = await job_queue.submit_job(_background_subreddit_analysis, request)
@@ -202,8 +222,19 @@ async def analyze_search_async(
 
     Returns:
         JobSubmissionResponse: Job submission details with tracking information
+        
+    Raises:
+        ValidationException: When request parameters are invalid
+        ConfigurationException: When system configuration is invalid
     """
     logger.info(f"Search analysis job submitted: {request.query}")
+
+    # Validate search query
+    if not request.query or not request.query.strip():
+        raise ValidationException(
+            "Search query cannot be empty",
+            field="query"
+        )
 
     job_queue = get_job_queue()
     job_id = await job_queue.submit_job(_background_search_analysis, request)
@@ -237,7 +268,18 @@ async def get_job_status(job_id: str) -> JobStatusResponse:
 
     Returns:
         JobStatusResponse: Current job status and results (if completed)
+        
+    Raises:
+        ValidationException: When job_id format is invalid
+        HTTPException: When job is not found (404)
     """
+    # Validate job ID format
+    if not job_id or not job_id.strip():
+        raise ValidationException(
+            "Job ID cannot be empty",
+            field="job_id"
+        )
+
     job_queue = get_job_queue()
     job_result = job_queue.get_job_status(job_id)
     
@@ -263,7 +305,18 @@ async def cancel_job(job_id: str) -> Dict[str, Any]:
 
     Returns:
         Cancellation status
+        
+    Raises:
+        ValidationException: When job_id format is invalid
+        HTTPException: When job is not found (404)
     """
+    # Validate job ID format
+    if not job_id or not job_id.strip():
+        raise ValidationException(
+            "Job ID cannot be empty",
+            field="job_id"
+        )
+
     job_queue = get_job_queue()
     
     # Check if job exists
@@ -299,6 +352,9 @@ async def get_queue_stats() -> JobQueueStatsResponse:
 
     Returns:
         JobQueueStatsResponse: Current queue statistics
+        
+    Raises:
+        ConfigurationException: When job queue is not properly configured
     """
     job_queue = get_job_queue()
     stats = job_queue.get_queue_stats()
@@ -306,111 +362,16 @@ async def get_queue_stats() -> JobQueueStatsResponse:
     return JobQueueStatsResponse(**stats)
 
 
-# Legacy Synchronous Endpoint (Deprecated)
-
-@router.post("/analyze-reddit-comments", response_model=UnifiedAnalysisResponse, dependencies=[Depends(verify_internal_api_key)])
-async def analyze_reddit_comments_legacy(
-    request: ConfigurableAnalysisRequest, background_tasks: BackgroundTasks
-) -> UnifiedAnalysisResponse:
-    """
-    DEPRECATED: Legacy synchronous endpoint for analyzing Reddit comments.
-    
-    WARNING: This endpoint processes requests synchronously and may timeout
-    for large requests. Use /analyze-subreddit or /analyze-search instead.
-
-    Args:
-        request: Configuration for the analysis including keywords, model, etc.
-        background_tasks: FastAPI background tasks for async processing
-
-    Returns:
-        UnifiedAnalysisResponse: Structured analysis results
-    """
-    logger.warning("Legacy synchronous endpoint accessed - consider using async endpoints")
-    logger.info(f"Legacy analysis request received: {request.keywords} in {request.subreddits}")
-
-    # Validate request
-    if not request.keywords:
-        raise HTTPException(
-            status_code=400, detail="At least one keyword is required"
-        )
-
-    if not request.subreddits:
-        raise HTTPException(
-            status_code=400, detail="At least one subreddit is required"
-        )
-
-    start_time = datetime.now()
-    all_comments = []
-    total_posts = 0
-    total_comments_found = 0
-    api_calls_made = 0
-    cell_parsing_errors = 0
-
-    # Collect posts from each subreddit using the SubredditDataCollector
-    for subreddit in request.subreddits:
-        logger.info(f"Processing subreddit r/{subreddit}")
-        
-        # Create subreddit request
-        subreddit_request = SubredditAnalysisRequest(
-            subreddit=subreddit,
-            sort="hot",
-            time=request.timeframe,
-            limit=request.limit,
-            model=request.model,
-            system_prompt=request.system_prompt
-        )
-        
-        async with SubredditDataCollector() as collector:
-            posts, metadata = await collector.collect_subreddit_posts(subreddit_request)
-            
-            api_calls_made += metadata.get("api_calls_made", 0)
-            cell_parsing_errors += metadata.get("cell_parsing_errors", 0)
-            
-            total_posts += len(posts)
-            
-            # Count total comments
-            for post in posts:
-                total_comments_found += len(post["comments"])
-            
-            # Analyze comments using AI
-            orchestrator = ModernConcurrentCommentAnalysisOrchestrator(max_concurrent_agents=settings.max_concurrent_agents)
-            analysis_results = await orchestrator.analyze_multiple_posts(posts, subreddit_request)
-            
-            # Collect all analyzed comments
-            for result in analysis_results:
-                all_comments.extend(result.analyzed_comments)
-
-    processing_time = (datetime.now() - start_time).total_seconds()
-
-    # Create response metadata
-    metadata = AnalysisMetadata(
-        total_posts_analyzed=total_posts,
-        total_comments_found=total_comments_found,
-        relevant_comments_extracted=len(all_comments),
-        irrelevant_posts=max(0, total_posts - len(all_comments)),
-        analysis_timestamp=datetime.now(),
-        processing_time_seconds=processing_time,
-        model_used=request.model,
-        api_calls_made=api_calls_made,
-        collection_method="subreddit",
-        cell_parsing_errors=cell_parsing_errors
-    )
-
-    response = UnifiedAnalysisResponse(
-        comment_analyses=all_comments, 
-        metadata=metadata
-    )
-
-    logger.info(
-        f"Legacy analysis completed: {len(all_comments)} comments analyzed from {total_posts} posts"
-    )
-    return response
-
-
 @router.get("/status", dependencies=[Depends(verify_internal_api_key)])
 async def api_status() -> Dict[str, Any]:
     """
     Detailed API status endpoint with configuration information.
+    
+    Returns:
+        Comprehensive API status and configuration details
+        
+    Raises:
+        ConfigurationException: When configuration is invalid or incomplete
     """
     logger.info("Status endpoint accessed")
 
@@ -428,26 +389,39 @@ async def api_status() -> Dict[str, Any]:
             "multi_model_support": True,
             "background_job_processing": True,
         },
-        "supported_models": ["gpt-4.1-2025-04-14", "gpt-4", "claude-3-sonnet"],
+        "supported_models": [
+            settings.openai_model,
+            settings.primary_ai_model,
+            "gpt-4",
+            "claude-3-sonnet"
+        ],
         "supported_endpoints": [
-            "/analyze-subreddit",  # New async endpoint
-            "/analyze-search",     # New async endpoint
-            "/jobs/{job_id}/status",
-            "/jobs/{job_id}",
-            "/jobs/queue/stats", 
-            "/analyze-reddit-comments",  # Legacy sync endpoint
-            "/health",
-            "/status"
+            "/analyze-subreddit",     # Async endpoint
+            "/analyze-search",        # Async endpoint
+            "/jobs/{job_id}/status",  # Job status tracking
+            "/jobs/{job_id}",         # Job cancellation
+            "/jobs/queue/stats",      # Queue statistics
+            "/health",                # Health check
+            "/status"                 # API status
         ],
         "configuration": {
             "max_concurrent_agents": settings.max_concurrent_agents,
+            "max_analysis_comments": settings.max_analysis_comments,
+            "max_thread_depth": settings.max_thread_depth,
             "log_level": settings.log_level,
             "debug_mode": settings.debug,
+            "openai_model": settings.openai_model,
+            "openai_temperature": settings.openai_temperature,
+            "openai_max_tokens": settings.openai_max_tokens,
         },
         "api_keys_configured": {
             "rapid_api": bool(settings.rapid_api_key),
             "openai_api": bool(settings.openai_api_key),
+            "internal_api": bool(settings.internal_api_key),
         },
-        "job_queue": queue_stats
+        "job_queue": queue_stats,
+        "deprecation_notices": [
+            "Legacy synchronous endpoints have been removed. Use async endpoints instead."
+        ]
     }
  

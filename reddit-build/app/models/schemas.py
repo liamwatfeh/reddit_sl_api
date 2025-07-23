@@ -4,8 +4,54 @@ Enhanced with conversation context and thread analysis support.
 """
 
 from pydantic import BaseModel, Field
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Literal
 from datetime import datetime
+
+from app.core.config import get_settings
+
+
+def get_default_system_prompt() -> str:
+    """Get default system prompt from settings."""
+    return get_settings().default_system_prompt
+
+
+def get_default_analysis_model() -> str:
+    """Get default analysis model from settings."""
+    return get_settings().default_analysis_model
+
+
+def get_default_subreddit_sort() -> str:
+    """Get default subreddit sort method from settings."""
+    return get_settings().default_subreddit_sort
+
+
+def get_default_subreddit_time() -> str:
+    """Get default subreddit time filter from settings."""
+    return get_settings().default_subreddit_time
+
+
+def get_default_search_sort() -> str:
+    """Get default search sort method from settings."""
+    return get_settings().default_search_sort
+
+
+def get_default_search_time() -> str:
+    """Get default search time filter from settings."""
+    return get_settings().default_search_time
+
+
+def get_default_request_limit() -> int:
+    """Get default request limit from settings."""
+    return get_settings().default_request_limit
+
+
+# Enum-like type definitions for validation (Improvement #3)
+SortMethod = Literal["hot", "new", "top", "controversial", "rising"]
+TimeFilter = Literal["hour", "day", "week", "month", "year", "all"]
+SearchSortMethod = Literal["relevance", "hot", "top", "new", "comments"]
+SentimentType = Literal["positive", "negative", "neutral"]
+ThemeType = str  # Keep as string for flexibility since themes are dynamic
+PurchaseIntentType = Literal["high", "medium", "low", "none"]
 
 
 class CommentAnalysis(BaseModel):
@@ -15,9 +61,9 @@ class CommentAnalysis(BaseModel):
     post_id: str
     post_url: str = Field(description="URL to original Reddit post for verification")
     quote: str = Field(description="Comment text content", max_length=1000)
-    sentiment: str = Field(description="Sentiment: positive, negative, neutral")
-    theme: str = Field(description="Main theme or topic discussed")
-    purchase_intent: str = Field(description="Purchase intent: high, medium, low, none")
+    sentiment: SentimentType = Field(description="Sentiment: positive, negative, neutral")
+    theme: ThemeType = Field(description="Main theme or topic discussed")
+    purchase_intent: PurchaseIntentType = Field(description="Purchase intent: high, medium, low, none")
     date: datetime
     source: str = Field(default="reddit", description="Data source platform")
     
@@ -81,7 +127,7 @@ class AnalysisContext(BaseModel):
     """Context configuration for AI analysis."""
     
     system_prompt: str = Field(
-        default="Analyze the following Reddit comment for sentiment (positive/negative/neutral), main theme, and purchase intent (high/medium/low/none). Provide a concise analysis focusing on the user's opinion and any buying signals.",
+        default_factory=get_default_system_prompt,
         description="System prompt for AI analysis"
     )
     max_comments_per_post: int = Field(
@@ -94,15 +140,15 @@ class SubredditAnalysisRequest(BaseModel):
     """Request model for subreddit analysis."""
 
     subreddit: str = Field(description="Target subreddit name (without r/)")
-    sort: str = Field(default="hot", description="Sort method: hot, new, top, rising")
-    time: str = Field(default="week", description="Time filter: hour, day, week, month, year")
-    limit: int = Field(default=25, description="Number of posts to collect", ge=1, le=100)
+    sort: SortMethod = Field(default_factory=get_default_subreddit_sort, description="Sort method: hot, new, top, controversial, rising")
+    time: TimeFilter = Field(default_factory=get_default_subreddit_time, description="Time filter: hour, day, week, month, year")
+    limit: int = Field(default_factory=get_default_request_limit, description="Number of posts to collect", ge=1, le=100)
     model: str = Field(
-        default="gpt-4.1-2025-04-14",
+        default_factory=get_default_analysis_model,
         description="AI model to use for analysis"
     )
     system_prompt: str = Field(
-        default="Analyze the following Reddit comment for sentiment (positive/negative/neutral), main theme, and purchase intent (high/medium/low/none). Provide a concise analysis focusing on the user's opinion and any buying signals.",
+        default_factory=get_default_system_prompt,
         description="Custom system prompt for AI analysis"
     )
 
@@ -111,16 +157,16 @@ class SearchAnalysisRequest(BaseModel):
     """Request model for search analysis."""
 
     query: str = Field(description="Search query for Reddit posts")
-    sort: str = Field(default="relevance", description="Sort method: relevance, hot, top, new, comments")
-    time: str = Field(default="all", description="Time filter: hour, day, week, month, year, all")
-    limit: int = Field(default=25, description="Number of posts to collect", ge=1, le=100)
+    sort: SearchSortMethod = Field(default_factory=get_default_search_sort, description="Sort method: relevance, hot, top, new, comments")
+    time: TimeFilter = Field(default_factory=get_default_search_time, description="Time filter: hour, day, week, month, year, all")
+    limit: int = Field(default_factory=get_default_request_limit, description="Number of posts to collect", ge=1, le=100)
     nsfw: bool = Field(default=False, description="Include NSFW content")
     model: str = Field(
-        default="gpt-4.1-2025-04-14",
+        default_factory=get_default_analysis_model,
         description="AI model to use for analysis"
     )
     system_prompt: str = Field(
-        default="Analyze the following Reddit comment for sentiment (positive/negative/neutral), main theme, and purchase intent (high/medium/low/none). Provide a concise analysis focusing on the user's opinion and any buying signals.",
+        default_factory=get_default_system_prompt,
         description="Custom system prompt for AI analysis"
     )
 
@@ -130,14 +176,14 @@ class ConfigurableAnalysisRequest(BaseModel):
 
     keywords: List[str] = Field(description="Keywords to search for")
     subreddits: List[str] = Field(description="List of subreddits to search")
-    timeframe: str = Field(default="week", description="Time period: day, week, month")
-    limit: int = Field(default=25, description="Number of posts per subreddit", ge=1, le=100)
+    timeframe: TimeFilter = Field(default_factory=get_default_subreddit_time, description="Time period: hour, day, week, month, year")
+    limit: int = Field(default_factory=get_default_request_limit, description="Number of posts per subreddit", ge=1, le=100)
     model: str = Field(
-        default="gpt-4.1-2025-04-14",
+        default_factory=get_default_analysis_model,
         description="AI model for analysis"
     )
     system_prompt: str = Field(
-        default="Analyze the following Reddit comment for sentiment (positive/negative/neutral), main theme, and purchase intent (high/medium/low/none). Provide a concise analysis focusing on the user's opinion and any buying signals.",
+        default_factory=get_default_system_prompt,
         description="System prompt for AI model"
     )
 
