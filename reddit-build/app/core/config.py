@@ -48,7 +48,7 @@ class Settings(BaseSettings):
         description="Allowed HTTP methods"
     )
     allowed_hosts: List[str] = Field(
-        default=["localhost", "127.0.0.1"], 
+        default=["localhost", "127.0.0.1", "redditslapi-production.up.railway.app"], 
         description="Allowed trusted hosts"
     )
 
