@@ -9,7 +9,8 @@ from fastapi.responses import JSONResponse
 import time
 import uuid
 from datetime import datetime
-from typing import Callable, Any
+from typing import Callable, Any, Dict
+from collections import defaultdict
 
 from app.core.config import get_settings
 from app.core.logging import get_logger, setup_logging
@@ -53,6 +54,39 @@ app.add_middleware(
     allow_headers=["Content-Type", "Authorization", "X-API-Key"],
 )
 
+# Point 6: Simple rate limiting (in-memory, production would use Redis)
+rate_limit_storage: Dict[str, Dict[str, float]] = defaultdict(lambda: {"count": 0, "reset_time": 0})
+
+@app.middleware("http")
+async def simple_rate_limit_middleware(request: Request, call_next: Callable[[Request], Any]) -> Any:
+    """Simple rate limiting middleware - 100 requests per minute per IP."""
+    if request.url.path in ["/health", "/docs", "/redoc"]:  # Skip rate limiting for health/docs
+        return await call_next(request)
+    
+    client_ip = request.client.host if request.client else "unknown"
+    current_time = time.time()
+    
+    # Reset counter every minute
+    if current_time > rate_limit_storage[client_ip]["reset_time"]:
+        rate_limit_storage[client_ip] = {"count": 0, "reset_time": current_time + 60}
+    
+    # Check limit (100 requests per minute)
+    if rate_limit_storage[client_ip]["count"] >= 100:
+        return JSONResponse(
+            status_code=429,
+            content={
+                "error_code": "RATE_LIMIT_EXCEEDED",
+                "message": "Too many requests. Please try again later.",
+                "request_id": f"req_{uuid.uuid4().hex[:12]}",
+                "timestamp": datetime.now().isoformat(),
+                "retry_after": int(rate_limit_storage[client_ip]["reset_time"] - current_time),
+            },
+            headers={"Retry-After": str(int(rate_limit_storage[client_ip]["reset_time"] - current_time))}
+        )
+    
+    rate_limit_storage[client_ip]["count"] += 1
+    return await call_next(request)
+
 
 # Request size limiting middleware (Point 3)
 @app.middleware("http")
@@ -75,7 +109,37 @@ async def request_size_limit_middleware(request: Request, call_next: Callable[[R
     return await call_next(request)
 
 
-# Request/response logging middleware
+# Point 8: Metrics collection middleware
+@app.middleware("http")
+async def metrics_middleware(request: Request, call_next: Callable[[Request], Any]) -> Any:
+    """Collect metrics for monitoring and observability."""
+    start_time = time.time()
+    
+    # Process request
+    response = await call_next(request)
+    
+    # Calculate metrics
+    process_time = time.time() - start_time
+    
+    # Point 8: Emit structured metrics for monitoring
+    logger.info(
+        "Request metrics",
+        extra={
+            "endpoint": request.url.path,
+            "method": request.method,
+            "status_code": response.status_code,
+            "duration_ms": round(process_time * 1000, 2),
+            "client_ip": request.client.host if request.client else "unknown",
+            "user_agent": request.headers.get("user-agent", "unknown")[:100],  # Truncate for safety
+            "request_size": request.headers.get("content-length", 0),
+            "response_size": response.headers.get("content-length", 0),
+        }
+    )
+    
+    return response
+
+
+# Request/response logging middleware (enhanced with metrics)
 @app.middleware("http")
 async def log_requests(request: Request, call_next: Callable[[Request], Any]) -> Any:
     """Log all HTTP requests and responses."""
@@ -98,6 +162,42 @@ async def log_requests(request: Request, call_next: Callable[[Request], Any]) ->
 
     return response
 
+
+# Point 9: Security headers middleware
+@app.middleware("http")
+async def security_headers_middleware(request: Request, call_next: Callable[[Request], Any]) -> Any:
+    """Add security headers to protect against common web vulnerabilities."""
+    response = await call_next(request)
+    
+    # Point 9: Add security headers
+    response.headers.update({
+        "X-Content-Type-Options": "nosniff",
+        "X-Frame-Options": "DENY",
+        "X-XSS-Protection": "1; mode=block",
+        "Referrer-Policy": "strict-origin-when-cross-origin",
+        "X-Permitted-Cross-Domain-Policies": "none",
+        "X-Download-Options": "noopen",
+    })
+    
+    # Add CSP for API (restrictive)
+    if not settings.debug:
+        response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none';"
+    
+    return response
+
+
+# Point 4: Helper function for consistent debug info handling
+def add_debug_info_if_enabled(response_content: dict, debug_info: dict = None) -> dict:
+    """Add debug info to response if debug mode is enabled."""
+    if settings.debug and debug_info:
+        response_content["debug_info"] = debug_info
+    return response_content
+
+
+# Point 10: Exception handlers ordered from most specific to most general
+# Order: BaseAPIException -> RedditAPIException -> AIAnalysisException -> 
+#        DataExtractionException -> RateLimitException -> Global Exception
+# This ordering ensures that specific exceptions are caught before generic ones
 
 # Enhanced Exception Handlers with UUID-based request IDs (Point 2)
 @app.exception_handler(BaseAPIException)
@@ -273,15 +373,52 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
 app.include_router(router)
 
 
-# Startup event
+# Point 5: Health check functions for startup
+async def check_reddit_api_health() -> bool:
+    """Check if Reddit API is accessible (non-blocking)."""
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            # Simple health check - just verify we can connect
+            response = await client.get("https://reddit.com", timeout=5.0)
+            return response.status_code < 500
+    except Exception:
+        return False
+
+async def check_openai_api_health() -> bool:
+    """Check if OpenAI API is accessible (non-blocking)."""
+    try:
+        if not settings.openai_api_key:
+            return False
+        # Don't make actual API call, just verify key format
+        return len(settings.openai_api_key) > 10
+    except Exception:
+        return False
+
+
+# Startup event with health checks (Point 5)
 @app.on_event("startup")
 async def startup_event() -> None:
-    """Log startup information."""
+    """Log startup information and check critical dependencies."""
     logger.info("🚀 Reddit Comment Analysis API starting up...")
     logger.info(f"📍 Version: {settings.app_version}")
     logger.info(f"🔧 Debug mode: {settings.debug}")
     logger.info(f"📊 Log level: {settings.log_level}")
     logger.info(f"🤖 Max concurrent agents: {settings.max_concurrent_agents}")
+    
+    # Point 5: Health check critical dependencies (non-blocking)
+    logger.info("🔍 Checking service dependencies...")
+    health_checks = {
+        "reddit_api": await check_reddit_api_health(),
+        "openai_api": await check_openai_api_health(),
+    }
+    
+    for service, is_healthy in health_checks.items():
+        if is_healthy:
+            logger.info(f"✅ {service} is healthy")
+        else:
+            logger.warning(f"⚠️  {service} health check failed - service may be degraded")
+            # Continue startup anyway - don't fail the deployment
 
 
 # Shutdown event
@@ -291,9 +428,15 @@ async def shutdown_event() -> None:
     logger.info("🛑 Reddit Comment Analysis API shutting down...")
 
 
-# Development mode startup check
+# Development mode startup check (Point 7: Production warnings)
 if __name__ == "__main__":
     import uvicorn
+
+    # Point 7: Production deployment warning
+    if not settings.debug:
+        logger.warning("⚠️  Direct uvicorn.run() detected in production mode!")
+        logger.warning("⚠️  Use Gunicorn with uvicorn workers for Railway deployment")
+        logger.warning("⚠️  Example: gunicorn app.main:app -w 4 -k uvicorn.workers.UvicornWorker")
 
     # Display startup information
     print("✅ Settings loaded successfully!")

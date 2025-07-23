@@ -106,6 +106,26 @@ class Settings(BaseSettings):
         default="gpt-4.1-2025-04-14", 
         description="Primary AI model for comment analysis"
     )
+    openai_model: str = Field(
+        default="gpt-4.1-2025-04-14", 
+        description="OpenAI model for comment analysis"
+    )
+    openai_temperature: float = Field(
+        default=0.1, 
+        description="OpenAI model temperature (0.0-2.0)"
+    )
+    openai_max_tokens: int = Field(
+        default=4000, 
+        description="Maximum tokens for OpenAI responses"
+    )
+    max_analysis_comments: int = Field(
+        default=50, 
+        description="Maximum number of comments to analyze per post"
+    )
+    max_thread_depth: int = Field(
+        default=10, 
+        description="Maximum thread depth for comment analysis"
+    )
 
     # API Server Configuration
     host: str = Field(default="0.0.0.0", description="Server host")
